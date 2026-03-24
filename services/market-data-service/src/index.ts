@@ -57,15 +57,20 @@ app.get('/api/v1/market/stocks/:symbol', async (req, res) => {
 app.get('/api/v1/market/history/:symbol', async (req, res) => {
   try {
     const { symbol } = req.params;
-    const { days = 30 } = req.query;
+    const days = parseInt(req.query.days as string) || 30;
+
+    if (days < 1 || days > 365) {
+      return res.status(400).json({ error: 'Days must be between 1 and 365' });
+    }
 
     const result = await pool.query(
-      'SELECT * FROM market_history WHERE symbol = $1 ORDER BY date DESC LIMIT $2',
+      'SELECT * FROM market_history WHERE symbol = $1 ORDER BY time DESC LIMIT $2',
       [symbol, days]
     );
 
     res.json(result.rows);
   } catch (error) {
+    console.error('Market history error:', error);
     res.status(500).json({ error: 'Failed to fetch history' });
   }
 });
@@ -74,8 +79,46 @@ app.get('/health', (req, res) => {
   res.json({ status: 'OK', service: 'market-data-service' });
 });
 
+const TRACKED_SYMBOLS = ['RELIANCE', 'TCS', 'INFY', 'WIPRO', 'AAPL', 'MSFT', 'GOOGL', 'AMZN'];
+
+async function startPriceBroadcast() {
+  setInterval(async () => {
+    try {
+      const symbol = TRACKED_SYMBOLS[Math.floor(Math.random() * TRACKED_SYMBOLS.length)];
+      const basePrice = symbol === 'RELIANCE' ? 2500 : 1000;
+      const price = basePrice + (Math.random() - 0.5) * 50;
+      const change = (Math.random() - 0.5) * 10;
+      
+      const marketData = {
+        symbol,
+        price,
+        change,
+        changePercent: (change / price) * 100,
+        volume: Math.floor(Math.random() * 1000000),
+        bid: price - 0.5,
+        ask: price + 0.5,
+        timestamp: new Date(),
+      };
+
+      // 1. Broadcast to Kafka
+      await producer.send({
+        topic: 'price_updates',
+        messages: [{ value: JSON.stringify(marketData) }],
+      });
+
+      // 2. Cache in Redis
+      await redisClient.setEx(`market:${symbol}`, 60, JSON.stringify(marketData));
+
+      console.log(`📈 PRICE_TICKER: [${symbol}] ₹${price.toFixed(2)}`);
+    } catch (err) {
+      console.error('Price broadcast failed:', err);
+    }
+  }, 5000); // 5s interval for production realism
+}
+
 app.listen(port, async () => {
   await producer.connect();
   await redisClient.connect();
+  startPriceBroadcast();
   console.log(`Market Data Service on port ${port}`);
 });

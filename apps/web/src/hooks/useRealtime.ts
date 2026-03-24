@@ -31,10 +31,12 @@ export function useRealtimePrice(token: string): UseRealtimePriceReturn {
   const [prices, setPrices] = useState<Map<string, PriceUpdate>>(new Map());
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const subscriptionsRef = useRef<Set<string>>(new Set());
+  const reconnectAttemptRef = useRef<number>(0);
   const reconnectTimeoutRef = useRef<Timeout | null>(null);
 
   const connect = useCallback(() => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) return;
+
     try {
       const WS_URL = process.env.NEXT_PUBLIC_WS_URL || `ws://localhost:3000/ws`;
       const ws = new WebSocket(`${WS_URL}?token=${token}`);
@@ -42,6 +44,7 @@ export function useRealtimePrice(token: string): UseRealtimePriceReturn {
       ws.onopen = () => {
         setConnected(true);
         setError(null);
+        reconnectAttemptRef.current = 0; // Reset attempts
         subscriptionsRef.current.forEach((symbol: string) => {
           ws.send(JSON.stringify({ type: 'SUBSCRIBE', channel: `price:${symbol}` }));
         });
@@ -59,13 +62,23 @@ export function useRealtimePrice(token: string): UseRealtimePriceReturn {
             });
           }
         } catch (err) {
-          console.error(err);
+          console.error('WS Parse Error:', err);
         }
       };
 
-      ws.onclose = () => {
+      ws.onclose = (event: CloseEvent) => {
         setConnected(false);
-        reconnectTimeoutRef.current = setTimeout(connect, 3000);
+        if (!event.wasClean) {
+          const delay = Math.min(1000 * Math.pow(2, reconnectAttemptRef.current), 30000);
+          reconnectAttemptRef.current += 1;
+          console.warn(`WebSocket closed. Reconnecting in ${delay}ms... (Attempt ${reconnectAttemptRef.current})`);
+          reconnectTimeoutRef.current = setTimeout(connect, delay);
+        }
+      };
+
+      ws.onerror = (err: Event) => {
+        console.error('WebSocket Error:', err);
+        setError('Real-time connection error');
       };
 
       wsRef.current = ws;

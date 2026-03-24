@@ -3,6 +3,7 @@ import { MotionDiv, MotionButton } from '@/components/Motion';
 import { FiZap, FiSearch } from 'react-icons/fi';
 import { useRealtimeTrading, validateTradeRequest } from '@/hooks/useRealtimeTrading';
 import { useRealtimePrice } from '@/hooks/useRealtime';
+import { AreaChart, Area, Tooltip, ResponsiveContainer } from 'recharts';
 
 interface TradeExecutionResult {
   orderId: string;
@@ -36,8 +37,10 @@ export function TradingPanelRealtime({
   const [stopLoss, setStopLoss] = useState('');
   const [takeProfit, setTakeProfit] = useState('');
 
+  const [priceHistory, setPriceHistory] = useState<{ time: string; price: number }[]>([]);
+
   // Hooks
-  const { executing, lastTrade, error, executeTrade, clearError } = useRealtimeTrading(token, userId);
+  const { executing, lastTrade, error, executeTrade, clearError, setError } = useRealtimeTrading(token, userId);
   const { prices, subscribe, unsubscribe } = useRealtimePrice(token);
 
   // Get current price for the symbol
@@ -46,8 +49,20 @@ export function TradingPanelRealtime({
   // Subscribe to symbol on mount
   useEffect(() => {
     subscribe(symbol.toUpperCase());
+    setPriceHistory([]); // Reset history on symbol change
     return () => unsubscribe(symbol.toUpperCase());
   }, [symbol, subscribe, unsubscribe]);
+
+  // Update Price History buffer
+  useEffect(() => {
+    if (currentPrice) {
+      setPriceHistory(prev => {
+        const next = [...prev, { time: new Date().toLocaleTimeString(), price: currentPrice.price }];
+        if (next.length > 30) return next.slice(1);
+        return next;
+      });
+    }
+  }, [currentPrice]);
 
   // Auto-fill price with current price
   useEffect(() => {
@@ -68,7 +83,7 @@ export function TradingPanelRealtime({
     });
 
     if (!validation.valid) {
-      alert(validation.error);
+      setError(validation.error || 'Invalid trade request');
       return;
     }
 
@@ -103,7 +118,7 @@ export function TradingPanelRealtime({
     });
 
     if (!validation.valid) {
-      alert(validation.error);
+      setError(validation.error || 'Invalid trade request');
       return;
     }
 
@@ -182,6 +197,36 @@ export function TradingPanelRealtime({
                   </div>
                 </div>
               )}
+
+              {/* TIC GRAPH INTEGRATION */}
+              <div className="h-[200px] w-full bg-white/[0.01] rounded-[2rem] border border-white/5 p-4 relative overflow-hidden group">
+                <div className="absolute top-4 left-6 z-10">
+                    <span className="text-[8px] font-black text-blue-400/50 uppercase tracking-[0.4em] italic">Ticker Volatility Velocity</span>
+                </div>
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={priceHistory}>
+                    <defs>
+                      <linearGradient id="colorPrice" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
+                        <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: 'rgba(15, 23, 42, 0.9)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '1rem', color: '#fff' }}
+                      itemStyle={{ color: '#60a5fa', fontWeight: 'bold' }}
+                    />
+                    <Area 
+                      type="monotone" 
+                      dataKey="price" 
+                      stroke="#3b82f6" 
+                      strokeWidth={3}
+                      fillOpacity={1} 
+                      fill="url(#colorPrice)" 
+                      animationDuration={300}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
             </div>
 
             {/* Quantity Input */}

@@ -36,6 +36,7 @@ interface UseRealtimeTradingReturn {
   error: string | null;
   executeTrade: (request: TradeRequest) => Promise<TradeResponse>;
   clearError: () => void;
+  setError: (error: string | null) => void;
 }
 
 export function useRealtimeTrading(token: string, userId: string): UseRealtimeTradingReturn {
@@ -113,6 +114,7 @@ export function useRealtimeTrading(token: string, userId: string): UseRealtimeTr
     error,
     executeTrade,
     clearError,
+    setError,
   };
 }
 

@@ -6,7 +6,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const app = express();
-const port = process.env.PORT || 3005;
+const port = process.env.PORT || 3011;
 
 const kafka = new Kafka({
   clientId: 'sentiment-service',
@@ -66,7 +66,7 @@ async function broadcastSentiment() {
     } catch (err) {
       console.error('❌ Sentiment broadcast failed:', err);
     }
-  }, 30000); // Frequency calibrated for 2026 Production
+  }, 10000); // Higher frequency for 2026 Sovereign Terminal
 }
 
 async function start() {

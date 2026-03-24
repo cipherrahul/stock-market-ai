@@ -74,18 +74,22 @@ async def predict(symbol: str):
              price = float(price_data)
 
         # 2. Run Inference (SOVEREIGN 2026: LSTM / Sentiment Hybrid)
-        # In this phase, we established high-fidelity grounding. 
-        # The engine now incorporates real-time price delta and volatility.
-        
-        # Simulated Alpha Logic (Replaced simplistic random with volatility-aware delta)
+        sentiment_data = redis_client.get(f"sentiment:{symbol}")
+        sentiment_score = 0.0
+        if sentiment_data:
+            sentiment = json.loads(sentiment_data)
+            sentiment_score = float(sentiment.get('score', 0.0))
+            logger.info(f"📊 Sentiment for {symbol}: {sentiment_score}")
+
+        # Simulated Alpha Logic (Replaced simplistic random with sentiment+volatility)
         volatility = np.random.normal(0, 0.01)
-        sentiment_bias = 0.05 if price > 2000 else -0.02 # Placeholder for sentiment integration
+        # Sentiment weight: 40% impact on signal
+        prediction_delta = (sentiment_score * 0.4) + (volatility * 0.6)
         
-        prediction_delta = sentiment_bias + volatility
-        confidence = 0.85 + abs(volatility) * 10 
-        confidence = min(max(confidence, 0.75), 0.98) # Normalize to human-readable confidence
+        confidence = 0.85 + (abs(sentiment_score) * 0.1) 
+        confidence = min(max(confidence, 0.75), 0.98) # Normalize
         
-        signal = "BUY" if prediction_delta > 0.02 else "SELL" if prediction_delta < -0.02 else "HOLD"
+        signal = "BUY" if prediction_delta > 0.05 else "SELL" if prediction_delta < -0.05 else "HOLD"
         
         # 3. Broadcast Sovereign Signal to High-Latency Fleet
         alert = {
@@ -107,6 +111,34 @@ async def predict(symbol: str):
     except Exception as e:
         logger.error(f"❌ Inference Error: {e}")
         raise HTTPException(status_code=500, detail="AI Inference Engine Failure")
+
+from aiokafka import AIOKafkaConsumer
+import asyncio
+
+async def kafka_consume_loop():
+    consumer = AIOKafkaConsumer(
+        'price_updates',
+        bootstrap_servers=os.getenv("KAFKA_BROKER", "localhost:9092"),
+        group_id="ai-engine-group",
+        value_deserializer=lambda v: json.loads(v.decode('utf-8'))
+    )
+    await consumer.start()
+    logger.info("📡 AI ENGINE: Autonomous Kafka Consumer ACTIVE")
+    try:
+        async for msg in consumer:
+            data = msg.value
+            symbol = data.get('symbol')
+            if symbol:
+                # Trigger internal prediction logic
+                await predict(symbol)
+    except Exception as e:
+        logger.error(f"❌ Kafka Consumer Error: {e}")
+    finally:
+        await consumer.stop()
+
+@app.on_event("startup")
+async def startup_event():
+    asyncio.create_task(kafka_consume_loop())
 
 if __name__ == "__main__":
     import uvicorn

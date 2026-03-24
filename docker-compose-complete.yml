@@ -339,6 +339,58 @@ services:
     networks:
       - trading_network
 
+  # Risk Management Service
+  risk-management-service:
+    build:
+      context: ./services/risk-management-service
+      dockerfile: Dockerfile
+    ports:
+      - "3010:3010"
+    environment:
+      PORT: 3010
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-trading_user}
+      DB_PASSWORD: ${DB_PASSWORD:-SecurePass123}
+      DB_NAME: ${DB_NAME:-trading_platform}
+      KAFKA_BROKER: kafka:29092
+      BROKER_SERVICE_URL: http://broker-integration-service:3007
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3010/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - trading_network
+
+  # Sentiment Service
+  sentiment-service:
+    build:
+      context: ./services/sentiment-service
+      dockerfile: Dockerfile
+    ports:
+      - "3011:3011"
+    environment:
+      PORT: 3011
+      REDIS_URL: redis://redis:6379
+      KAFKA_BROKER: kafka:29092
+    depends_on:
+      - redis
+      kafka:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3011/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - trading_network
+
   # Next.js Frontend
   web:
     build:

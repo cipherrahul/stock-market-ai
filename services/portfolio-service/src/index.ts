@@ -85,8 +85,16 @@ async function syncPortfolio(userId: string) {
     }
 
     PORTFOLIO_CACHE.set(userId, { balance: Number(totalValueValue) / 100, timestamp: Date.now() });
+    
+    // 5. AUDIT: RECORD TRUTH TO HISTORY
+    await pool.query(
+        `INSERT INTO portfolio_history (user_id, total_value, cash, pnl, created_at)
+         VALUES ($1, $2, $3, $4, NOW())`,
+        [userId, Number(totalValueValue) / 100, Number(currentBalance) / 100, (Number(totalValueValue) - Number(LAST_MILESTONE_VAL)) / 100]
+    );
+
     await redisClient.setEx(`portfolio:${userId}`, 3600, JSON.stringify(summary));
-    console.log(`✅ Portfolio synced for user ${userId}`);
+    console.log(`✅ Portfolio synced & recorded for user ${userId}`);
   } catch (err) {
     console.error('Sync failed:', err);
   }

@@ -49,14 +49,30 @@ app.put('/api/v1/users/:userId', async (req, res) => {
     const { userId } = req.params;
     const { name, preferences, riskLevel } = req.body;
 
+    // Validation
+    if (name && (typeof name !== 'string' || name.length < 2)) {
+      return res.status(400).json({ error: 'Invalid name' });
+    }
+    if (preferences && typeof preferences !== 'object') {
+      return res.status(400).json({ error: 'Preferences must be an object' });
+    }
+    if (riskLevel && !['low', 'medium', 'high'].includes(riskLevel)) {
+      return res.status(400).json({ error: 'Invalid risk level' });
+    }
+
     const result = await pool.query(
-      'UPDATE users SET name = $1, preferences = $2, risk_level = $3 WHERE id = $4 RETURNING *',
-      [name, JSON.stringify(preferences), riskLevel, userId]
+      'UPDATE users SET name = COALESCE($1, name), preferences = COALESCE($2, preferences), risk_level = COALESCE($3, risk_level) WHERE id = $4 RETURNING *',
+      [name, preferences ? JSON.stringify(preferences) : null, riskLevel, userId]
     );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
 
     await redisClient.del(`user:${userId}`);
     res.json(result.rows[0]);
   } catch (error) {
+    console.error('Update user error:', error);
     res.status(500).json({ error: 'Failed to update user' });
   }
 });

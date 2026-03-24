@@ -27,14 +27,33 @@ app.post('/api/v1/trading/execute', async (req, res) => {
   try {
     const { userId, symbol, quantity, side, price } = req.body;
 
+    // Validation
+    if (!userId || !symbol || !quantity || !side || !price) {
+      return res.status(400).json({ error: 'Missing required trade parameters' });
+    }
+    if (quantity <= 0 || price <= 0) {
+      return res.status(400).json({ error: 'Quantity and price must be positive' });
+    }
+    if (!['BUY', 'SELL'].includes(side)) {
+      return res.status(400).json({ error: 'Invalid trade side' });
+    }
+
     // Validate risk
-    const portfolio = await axios.get(
+    const portfolioRes = await axios.get(
       `${process.env.PORTFOLIO_SERVICE_URL}/api/v1/portfolio/${userId}`
     );
+    const portfolio = portfolioRes.data;
+
+    if (side === 'BUY') {
+      const cost = price * quantity;
+      if (portfolio.balance < cost) {
+        return res.status(400).json({ error: 'Insufficient balance for trade' });
+      }
+    }
 
     // Risk check
     const riskAmount = price * quantity;
-    if (riskAmount > process.env.MAX_POSITION_SIZE) {
+    if (riskAmount > (Number(process.env.MAX_POSITION_SIZE) || 1000000)) {
       return res.status(400).json({ error: 'Position size exceeds limit' });
     }
 
@@ -56,6 +75,7 @@ app.post('/api/v1/trading/execute', async (req, res) => {
       brokerOrderId: brokerResponse.data.orderId,
     });
   } catch (error) {
+    console.error('Trade execution error:', (error as any).message);
     res.status(500).json({ error: 'Trade execution failed' });
   }
 });
