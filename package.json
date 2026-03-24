@@ -1,0 +1,32 @@
+{
+  "name": "stock-trading-platform",
+  "version": "1.0.0",
+  "description": "AI-powered autonomous stock trading microservices platform",
+  "private": true,
+  "workspaces": [
+    "services/*",
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "docker-compose up -d",
+    "dev:logs": "docker-compose logs -f",
+    "dev:down": "docker-compose down",
+    "build": "docker-compose build",
+    "test": "lerna run test",
+    "lint": "lerna run lint",
+    "format": "lerna run format",
+    "db:migrate": "docker-compose exec postgres psql -U trading_user -d trading_platform -f /scripts/migrations.sql",
+    "db:seed": "docker-compose exec postgres psql -U trading_user -d trading_platform -f /scripts/seed.sql"
+  },
+  "devDependencies": {
+    "lerna": "^7.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "plaid": "^41.4.0",
+    "stripe": "^20.4.1"
+  }
+}

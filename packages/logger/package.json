@@ -1,0 +1,9 @@
+{
+  "name": "@trading-platform/logger",
+  "version": "1.0.0",
+  "description": "Centralized logging service",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "version": "1.0.0",
+  "npmClient": "npm",
+  "packages": [
+    "services/*",
+    "packages/*",
+    "apps/*"
+  ],
+  "command": {
+    "publish": {
+      "ignoreChanges": [
+        "CHANGELOG.md",
+        "*.md"
+      ]
+    },
+    "version": {
+      "allowBranch": ["main", "develop"],
+      "message": "Publish %v"
+    }
+  }
+}

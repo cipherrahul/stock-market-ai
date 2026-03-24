@@ -1,0 +1,12 @@
+{
+  "name": "ai-engine-service",
+  "version": "1.0.0",
+  "description": "AI/ML Model & Signal Generation Service",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "python -m uvicorn app:app --reload --port 3004",
+    "build": "echo 'Python service - no build needed'",
+    "start": "python -m uvicorn app:app --host 0.0.0.0 --port 3004"
+  },
+  "devDependencies": {}
+}
