@@ -2,7 +2,7 @@ import { BaseBroker } from './BaseBroker';
 import { OrderRequest, OrderResponse, BrokerStatus } from '../types';
 // @ts-ignore - SDK types can be problematic
 import { UpstoxClient } from 'upstox-js-sdk';
-import { SecurityVault } from '@security/index';
+import { SecurityVault } from '../SecurityVault';
 
 export class UpstoxAdapter extends BaseBroker {
     public name = 'UPSTOX_SECONDARY';

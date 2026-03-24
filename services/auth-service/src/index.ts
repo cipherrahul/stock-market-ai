@@ -185,8 +185,6 @@ const redisClient = createClient({
     },
     keepAlive: 30000,
   },
-  // Enable automatic reconnection after drop
-  connectionName: 'auth-service-client',
 });
 
 redisClient.on('error', (err) => {
@@ -570,7 +568,7 @@ app.post('/api/v1/auth/login', authLimiter, async (req: Request, res: Response) 
       } as TokenPayload,
       process.env.JWT_SECRET!,
       {
-        expiresIn: process.env.JWT_ACCESS_EXPIRY || '15m',
+        expiresIn: (process.env.JWT_ACCESS_EXPIRY || '15m') as any,
         issuer: 'auth-service',
         audience: 'api',
       }
@@ -586,7 +584,7 @@ app.post('/api/v1/auth/login', authLimiter, async (req: Request, res: Response) 
       } as TokenPayload,
       process.env.JWT_REFRESH_SECRET!,
       {
-        expiresIn: process.env.JWT_REFRESH_EXPIRY || '7d',
+        expiresIn: (process.env.JWT_REFRESH_EXPIRY || '7d') as any,
         issuer: 'auth-service',
         audience: 'api',
       }
@@ -724,7 +722,7 @@ app.post('/api/v1/auth/refresh', apiLimiter, async (req: Request, res: Response)
       } as TokenPayload,
       process.env.JWT_SECRET!,
       {
-        expiresIn: process.env.JWT_ACCESS_EXPIRY || '15m',
+        expiresIn: (process.env.JWT_ACCESS_EXPIRY || '15m') as any,
         issuer: 'auth-service',
         audience: 'api',
       }

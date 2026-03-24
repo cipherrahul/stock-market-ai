@@ -1,7 +1,7 @@
 import { BaseBroker } from './BaseBroker';
 import { OrderRequest, OrderResponse, BrokerStatus } from '../types';
 import { KiteConnect } from 'kiteconnect';
-import { SecurityVault } from '@security/index';
+import { SecurityVault } from '../SecurityVault';
 
 export class ZerodhaAdapter extends BaseBroker {
     public name = 'ZERODHA_PRIMARY';
