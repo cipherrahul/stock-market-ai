@@ -57,6 +57,27 @@ SIGNAL_GENERATORS: Dict[str, Any] = {}
 
 # ... (Predictor classes remain same but are now used with real data)
 
+def generate_intelligence_memo(symbol: str, signal: str, sentiment: float, confidence: float) -> str:
+    """Generates a natural-language reason for the Sovereign Signal."""
+    templates = {
+        "BUY": [
+            f"Accumulating {symbol} as high-fidelity sentiment (+{sentiment:.2f}) indicates systemic bullish divergence.",
+            f"Sovereign Alpha identifies {symbol} as oversold with {confidence*100:.1f}% confidence. Executing entry.",
+            f"Sentiment momentum for {symbol} is peaking. Neural-Alpha V2 predicts upward structural expansion."
+        ],
+        "SELL": [
+            f"Liquidating {symbol} risk as bearish sentiment flows (-{sentiment:.2f}) enter the operational ledger.",
+            f"Confidence in {symbol} downside is high ({confidence*100:.1f}%). Terminating position to preserve liquidity.",
+            f"Bearish trend confirmed for {symbol}. Moving to neutral or short bias based on structural weakness."
+        ],
+        "HOLD": [
+            f"Maintaining {symbol} exposure. Volatility is within normal parameters, no structural signal detected.",
+            f"Sentiment for {symbol} is neutral. Monitoring for high-probability liquidity clusters."
+        ]
+    }
+    import random
+    return random.choice(templates.get(signal, ["Monitoring market conditions."]))
+
 @app.get("/api/v1/ai/predict/{symbol}")
 async def predict(symbol: str):
     logger.info(f"🔮 AI Engine: Generating Sovereign Signal for {symbol}...")
@@ -98,6 +119,8 @@ async def predict(symbol: str):
             "confidence": round(float(confidence), 4),
             "price_target": round(float(price * (1 + prediction_delta + 0.03)), 2),
             "regime": "BULL" if prediction_delta > 0 else "BEAR",
+            "memo": generate_intelligence_memo(symbol, signal, sentiment_score, confidence),
+            "isPaper": True, # Defaulting to True for safety during testing
             "timestamp": pd.Timestamp.now().isoformat(),
             "meta": {
                 "engine": "NEURAL_ALPHA_V2",

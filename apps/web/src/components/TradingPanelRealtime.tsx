@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { MotionDiv, MotionButton } from '@/components/Motion';
 import { FiZap, FiSearch } from 'react-icons/fi';
 import { useRealtimeTrading, validateTradeRequest } from '@/hooks/useRealtimeTrading';
 import { useRealtimePrice } from '@/hooks/useRealtime';
-import { AreaChart, Area, Tooltip, ResponsiveContainer } from 'recharts';
+import { SovereignChart } from './charts/SovereignChart';
+import { CandlestickData, UTCTimestamp } from 'lightweight-charts';
 
 interface TradeExecutionResult {
   orderId: string;
@@ -20,6 +21,7 @@ interface TradeExecutionResult {
 interface TradingPanelProps {
   token: string;
   userId: string;
+  isPaper?: boolean;
   defaultSymbol?: string;
   onTradeExecuted?: (trade: TradeExecutionResult) => void;
 }
@@ -27,6 +29,7 @@ interface TradingPanelProps {
 export function TradingPanelRealtime({
   token,
   userId,
+  isPaper = false,
   defaultSymbol = 'RELIANCE',
   onTradeExecuted,
 }: TradingPanelProps) {
@@ -37,7 +40,7 @@ export function TradingPanelRealtime({
   const [stopLoss, setStopLoss] = useState('');
   const [takeProfit, setTakeProfit] = useState('');
 
-  const [priceHistory, setPriceHistory] = useState<{ time: string; price: number }[]>([]);
+  const [priceHistory, setPriceHistory] = useState<CandlestickData[]>([]);
 
   // Hooks
   const { executing, lastTrade, error, executeTrade, clearError, setError } = useRealtimeTrading(token, userId);
@@ -53,13 +56,37 @@ export function TradingPanelRealtime({
     return () => unsubscribe(symbol.toUpperCase());
   }, [symbol, subscribe, unsubscribe]);
 
-  // Update Price History buffer
+  // Update Price History buffer (Candlestick Grouping)
   useEffect(() => {
     if (currentPrice) {
+      const timestamp = Math.floor(Date.now() / 1000) as UTCTimestamp;
+      const roundedTime = (Math.floor(timestamp / 60) * 60) as UTCTimestamp; // 1-minute candles
+
       setPriceHistory(prev => {
-        const next = [...prev, { time: new Date().toLocaleTimeString(), price: currentPrice.price }];
-        if (next.length > 30) return next.slice(1);
-        return next;
+        const lastCandle = prev[prev.length - 1];
+        
+        if (lastCandle && lastCandle.time === roundedTime) {
+          // Update existing candle
+          const updatedCandle = {
+            ...lastCandle,
+            high: Math.max(lastCandle.high, currentPrice.price),
+            low: Math.min(lastCandle.low, currentPrice.price),
+            close: currentPrice.price,
+          };
+          return [...prev.slice(0, -1), updatedCandle];
+        } else {
+          // Start new candle
+          const newCandle: CandlestickData = {
+            time: roundedTime,
+            open: currentPrice.price,
+            high: currentPrice.price,
+            low: currentPrice.price,
+            close: currentPrice.price,
+          };
+          const next = [...prev, newCandle];
+          if (next.length > 100) return next.slice(1);
+          return next;
+        }
       });
     }
   }, [currentPrice]);
@@ -94,6 +121,7 @@ export function TradingPanelRealtime({
       price: price ? parseFloat(price) : undefined,
       stopLoss: stopLoss ? parseFloat(stopLoss) : undefined,
       takeProfit: takeProfit ? parseFloat(takeProfit) : undefined,
+      isPaper,
     });
 
     if (trade.status === 'EXECUTED') {
@@ -129,6 +157,7 @@ export function TradingPanelRealtime({
       price: price ? parseFloat(price) : undefined,
       stopLoss: stopLoss ? parseFloat(stopLoss) : undefined,
       takeProfit: takeProfit ? parseFloat(takeProfit) : undefined,
+      isPaper,
     });
 
     if (trade.status === 'EXECUTED') {
@@ -199,33 +228,11 @@ export function TradingPanelRealtime({
               )}
 
               {/* TIC GRAPH INTEGRATION */}
-              <div className="h-[200px] w-full bg-white/[0.01] rounded-[2rem] border border-white/5 p-4 relative overflow-hidden group">
+              <div className="h-[250px] w-full relative overflow-hidden group">
                 <div className="absolute top-4 left-6 z-10">
-                    <span className="text-[8px] font-black text-blue-400/50 uppercase tracking-[0.4em] italic">Ticker Volatility Velocity</span>
+                    <span className="text-[8px] font-black text-emerald-400/50 uppercase tracking-[0.4em] italic">Real-Time Alpha Tick Feed</span>
                 </div>
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={priceHistory}>
-                    <defs>
-                      <linearGradient id="colorPrice" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
-                        <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
-                      </linearGradient>
-                    </defs>
-                    <Tooltip 
-                      contentStyle={{ backgroundColor: 'rgba(15, 23, 42, 0.9)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '1rem', color: '#fff' }}
-                      itemStyle={{ color: '#60a5fa', fontWeight: 'bold' }}
-                    />
-                    <Area 
-                      type="monotone" 
-                      dataKey="price" 
-                      stroke="#3b82f6" 
-                      strokeWidth={3}
-                      fillOpacity={1} 
-                      fill="url(#colorPrice)" 
-                      animationDuration={300}
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
+                <SovereignChart data={priceHistory} />
               </div>
             </div>
 

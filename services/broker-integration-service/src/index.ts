@@ -30,7 +30,7 @@ app.post('/api/v1/broker/execute', async (req: Request, res: Response) => {
     setTimeout(() => REQUEST_COUNT--, RATE_LIMIT_WINDOW);
     if (REQUEST_COUNT > 5) return res.status(429).json({ error: 'Institutional Rate Limit Exceeded' });
 
-    const { symbol, side, price, quantity, idempotencyKey, bid, ask, userId } = req.body;
+    const { symbol, side, price, quantity, idempotencyKey, bid, ask, userId, memo } = req.body;
 
     // 2. IDEMPOTENCY
     if (IDEMPOTENCY_CACHE.has(idempotencyKey)) {
@@ -55,7 +55,7 @@ app.post('/api/v1/broker/execute', async (req: Request, res: Response) => {
     if (survivalCount < 950) return res.status(422).json({ error: 'Shadow Stress Test Failed' });
 
     // 5. SMART ORDER ROUTING (SOR)
-    const orderRequest: OrderRequest = { symbol, side, price, quantity, idempotencyKey, userId };
+    const orderRequest: OrderRequest = { symbol, side, price, quantity, idempotencyKey, userId, memo };
     const result = await router.route(orderRequest);
 
     res.json(result);

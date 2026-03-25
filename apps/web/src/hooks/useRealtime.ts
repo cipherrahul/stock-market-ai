@@ -33,6 +33,7 @@ export function useRealtimePrice(token: string): UseRealtimePriceReturn {
   const [error, setError] = useState<string | null>(null);
   const reconnectAttemptRef = useRef<number>(0);
   const reconnectTimeoutRef = useRef<Timeout | null>(null);
+  const subscriptionsRef = useRef<Set<string>>(new Set());
 
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
@@ -116,11 +117,12 @@ interface PortfolioUpdate {
   totalValue: number;
   totalGain: number;
   gainPercent: number;
+  balances?: { cash: number; currency: string }[];
   positions: any[];
   timestamp: string;
 }
 
-export function useRealtimePortfolio(token: string, userId: string): { portfolio: PortfolioUpdate | null, connected: boolean, error: string | null } {
+export function useRealtimePortfolio(token: string, userId: string, isPaper: boolean = false): { portfolio: PortfolioUpdate | null, connected: boolean, error: string | null } {
   const [portfolio, setPortfolio] = useState<PortfolioUpdate | null>(null);
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -128,7 +130,7 @@ export function useRealtimePortfolio(token: string, userId: string): { portfolio
 
   useEffect(() => {
     const WS_URL = process.env.NEXT_PUBLIC_WS_URL || `ws://localhost:3000/ws`;
-    const ws = new WebSocket(`${WS_URL}?token=${token}&userId=${userId}`);
+    const ws = new WebSocket(`${WS_URL}?token=${token}&userId=${userId}&isPaper=${isPaper}`);
 
     ws.onopen = () => {
       setConnected(true);
@@ -147,7 +149,7 @@ export function useRealtimePortfolio(token: string, userId: string): { portfolio
 
     wsRef.current = ws;
     return () => ws.close();
-  }, [token, userId]);
+  }, [token, userId, isPaper]);
 
   return { portfolio, connected, error };
 }
@@ -159,17 +161,18 @@ interface OrderUpdate {
   side: 'BUY' | 'SELL';
   status: string;
   executedPrice?: number;
+  memo?: string;
   timestamp: string;
 }
 
-export function useRealtimeOrders(token: string): { orders: OrderUpdate[], connected: boolean, error: string | null } {
+export function useRealtimeOrders(token: string, isPaper: boolean = false): { orders: OrderUpdate[], connected: boolean, error: string | null } {
   const [orders, setOrders] = useState<OrderUpdate[]>([]);
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const WS_URL = process.env.NEXT_PUBLIC_WS_URL || `ws://localhost:3000/ws`;
-    const ws = new WebSocket(`${WS_URL}?token=${token}`);
+    const ws = new WebSocket(`${WS_URL}?token=${token}&isPaper=${isPaper}`);
 
     ws.onopen = () => {
       setConnected(true);
@@ -189,7 +192,7 @@ export function useRealtimeOrders(token: string): { orders: OrderUpdate[], conne
     ws.onclose = () => setConnected(false);
 
     return () => ws.close();
-  }, [token]);
+  }, [token, isPaper]);
 
   return { orders, connected, error };
 }

@@ -4,6 +4,7 @@ import axios from 'axios';
 import dotenv from 'dotenv';
 import { Kafka } from 'kafkajs';
 import { Pool } from 'pg';
+import { StripeGateway } from './gateways/StripeGateway';
 
 dotenv.config();
 
@@ -25,6 +26,8 @@ const kafka = new Kafka({
 
 const producer = kafka.producer();
 const PORT = process.env.BILL_PAYMENT_PORT || 3016;
+
+const paymentGateway = new StripeGateway(process.env.STRIPE_SECRET_KEY || 'sk_test_mock');
 
 /**
  * AUTONOMOUS BILL SETTLEMENT LOOP
@@ -53,6 +56,20 @@ async function checkAndPayBills() {
                     amount: bill.amount,
                     destination: 'BANK_ACCOUNT_PRIMARY'
                 });
+
+                // 2b. Process External Payment via Stripe
+                const paymentResult = await paymentGateway.processPayment(
+                    parseFloat(bill.amount),
+                    'INR', // Default for now
+                    `Sovereign Bill Settlement: ${bill.vendor}`
+                );
+
+                if (!paymentResult.success) {
+                    console.error(`❌ STRIPE_FAILURE [${bill.vendor}]: ${paymentResult.error}`);
+                    continue; // Skip this bill for now
+                }
+
+                console.log(`✅ STRIPE_SUCCESS: Transaction ${paymentResult.transactionId} confirmed.`);
 
                 // 3. Update DB (Atomic)
                 await pool.query(

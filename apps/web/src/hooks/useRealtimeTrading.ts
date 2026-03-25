@@ -13,6 +13,7 @@ interface TradeRequest {
   price?: number; // Optional: if not provided, use market price
   stopLoss?: number;
   takeProfit?: number;
+  isPaper?: boolean;
 }
 
 interface TradeResponse {

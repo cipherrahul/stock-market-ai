@@ -85,7 +85,9 @@ async function executeTradeRealtime(
   requestedPrice: number,
   side: 'BUY' | 'SELL',
   stopLoss?: number,
-  takeProfit?: number
+  takeProfit?: number,
+  memo?: string,
+  isPaper?: boolean
 ): Promise<any> {
   const client = await pool.connect();
   const orderId = `ORD-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -154,7 +156,9 @@ async function executeTradeRealtime(
         quantity: quantity,
         price: executedPrice, // Use the calculated executedPrice
         userId: userId, // Use the actual userId
-        isAgentic: true
+        isAgentic: true,
+        memo: memo,
+        isPaper: isPaper,
       });
 
       brokerOrderId = brokerRes.data.orderId;
@@ -170,10 +174,10 @@ async function executeTradeRealtime(
     // Step 5: Create order record (with Broker ID)
     const orderResult = await client.query(
       `INSERT INTO orders 
-       (user_id, symbol, quantity, price, requested_price, side, status, slippage, transaction_id, broker_order_id, stop_loss_price, take_profit_price, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
+       (user_id, symbol, quantity, price, requested_price, side, status, slippage, transaction_id, broker_order_id, stop_loss_price, take_profit_price, memo, is_paper, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
        RETURNING id, created_at`,
-      [userId, symbol, quantity, executedPrice, requestedPrice, side, 'EXECUTED', slippage, transactionId, brokerOrderId, stopLoss, takeProfit]
+      [userId, symbol, quantity, executedPrice, requestedPrice, side, 'EXECUTED', slippage, transactionId, brokerOrderId, stopLoss, takeProfit, memo, isPaper]
     );
 
     const createdOrder = orderResult.rows[0];
@@ -222,6 +226,8 @@ async function executeTradeRealtime(
       status: 'EXECUTED',
       stopLoss,
       takeProfit,
+      memo,
+      isPaper,
       timestamp: createdOrder.created_at,
       executedAt: new Date(),
     };
@@ -305,7 +311,7 @@ async function executeTradeRealtime(
 // Execute trade (BUY or SELL)
 app.post('/api/v1/trading/execute', async (req: Request, res: Response) => {
   try {
-    const { userId, symbol, quantity, side, price, stopLoss, takeProfit } = req.body;
+    const { userId, symbol, quantity, side, price, stopLoss, takeProfit, memo, isPaper } = req.body;
 
     // Validate input
     if (!userId || !symbol || !quantity || !side) {
@@ -328,7 +334,9 @@ app.post('/api/v1/trading/execute', async (req: Request, res: Response) => {
       price || 0, // Will use market price if 0
       side as 'BUY' | 'SELL',
       stopLoss,
-      takeProfit
+      takeProfit,
+      memo,
+      isPaper
     );
 
     res.status(201).json(result);

@@ -1,6 +1,7 @@
 import { BaseBroker } from './adapters/BaseBroker';
 import { ZerodhaAdapter } from './adapters/ZerodhaAdapter';
 import { UpstoxAdapter } from './adapters/UpstoxAdapter';
+import { AlpacaAdapter } from './adapters/AlpacaAdapter';
 import { OrderRequest, OrderResponse } from './types';
 
 export class BrokerRegistry {
@@ -9,6 +10,10 @@ export class BrokerRegistry {
     constructor() {
         this.brokers.push(new ZerodhaAdapter());
         this.brokers.push(new UpstoxAdapter());
+        this.brokers.push(new AlpacaAdapter(
+            process.env.ALPACA_API_KEY || 'PK_DEBUG_KEY',
+            process.env.ALPACA_API_SECRET || 'SK_DEBUG_SECRET'
+        ));
     }
 
     public getBestBroker(): BaseBroker | null {
@@ -18,6 +23,11 @@ export class BrokerRegistry {
             .sort((a, b) => a.latency - b.latency);
 
         return healthyBrokers.length > 0 ? healthyBrokers[0] : null;
+    }
+
+    public getPaperBroker(): BaseBroker | null {
+        // Alpaca is our primary shadow broker
+        return this.brokers.find(b => b.name === 'Alpaca') || this.getBestBroker();
     }
 
     public getAllStatus() {
@@ -33,9 +43,16 @@ export class SmartOrderRouter {
     }
 
     async route(order: OrderRequest): Promise<OrderResponse> {
-        const bestBroker = this.registry.getBestBroker();
+        let brokerToUse: BaseBroker | null = null;
+        
+        if (order.isPaper) {
+            // Find a broker that supports paper (Alpaca by default)
+            brokerToUse = this.registry.getPaperBroker();
+        } else {
+            brokerToUse = this.registry.getBestBroker();
+        }
 
-        if (!bestBroker) {
+        if (!brokerToUse) {
             return {
                 status: 'HEDGED',
                 broker: 'NONE',
@@ -45,14 +62,13 @@ export class SmartOrderRouter {
         }
 
         try {
-            return await bestBroker.executeOrder(order);
+            return await brokerToUse.executeOrder(order);
         } catch (error) {
-            console.error(`❌ [SmartOrderRouter] Failover required for ${bestBroker.name}`);
-            // Recurse to try next best broker (Registry should ideally mark the failed one as disconnected temporarily)
-            // For now, simple implementation
+            console.error(`❌ [SmartOrderRouter] Failover required for ${brokerToUse.name}`);
+            // Recurse to try next best broker
             return {
                 status: 'FAILED',
-                broker: bestBroker.name,
+                broker: brokerToUse.name,
                 reason: 'Broker Execution Failed',
                 timestamp: new Date().toISOString()
             };

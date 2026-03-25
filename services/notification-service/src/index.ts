@@ -32,12 +32,15 @@ import jwt from 'jsonwebtoken';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'secret';
 
-function parseJWTFromURL(url: string): string | null {
+function parseParamsFromURL(url: string): { token: string | null, isPaper: boolean } {
   try {
     const urlObj = new URL(url, 'http://localhost');
-    return urlObj.searchParams.get('token') || null;
+    return {
+      token: urlObj.searchParams.get('token') || null,
+      isPaper: urlObj.searchParams.get('isPaper') === 'true'
+    };
   } catch {
-    return null;
+    return { token: null, isPaper: false };
   }
 }
 
@@ -67,9 +70,16 @@ async function startConsumer() {
           if (topic === 'price_updates') {
             shouldSend = true;
           } 
-          // Private data: only send if userId matches
-          else if (data.userId === client.userId || data.user_id === client.userId) {
-            shouldSend = true;
+          // Private data: only send if userId matches AND isPaper matches
+          else if ((data.userId === client.userId || data.user_id === client.userId)) {
+            // If the data has an isPaper flag, it MUST match the client's isPaper session
+            if (data.isPaper !== undefined) {
+               shouldSend = (data.isPaper === client.isPaper);
+            } else if (data.is_paper !== undefined) {
+               shouldSend = (data.is_paper === client.isPaper);
+            } else {
+               shouldSend = true; // Fallback for legacy messages
+            }
           }
           // Signal data: broadcast to all (public signal)
           else if (topic === 'ai_signals' || topic === 'sentiment_updates') {
@@ -90,13 +100,14 @@ async function startConsumer() {
 interface ClientSession {
   ws: WebSocket;
   userId: string;
+  isPaper: boolean;
 }
 
 const connectedClients = new Map<string, ClientSession>();
 
 // WebSocket connections
 wss.on('connection', (ws: WebSocket, req: any) => {
-  const token = parseJWTFromURL(req.url);
+  const { token, isPaper } = parseParamsFromURL(req.url);
   if (!token) {
     ws.close(4001, 'No token provided');
     return;
@@ -105,10 +116,10 @@ wss.on('connection', (ws: WebSocket, req: any) => {
   try {
     const decoded = jwt.verify(token, JWT_SECRET) as any;
     const userId = decoded.userId;
-    const clientId = `${userId}-${Date.now()}`;
+    const clientId = `${userId}-${isPaper ? 'paper-' : ''}${Date.now()}`;
     
-    connectedClients.set(clientId, { ws, userId });
-    console.log(`📡 Client connected to Notifications: ${clientId}`);
+    connectedClients.set(clientId, { ws, userId, isPaper });
+    console.log(`📡 Client connected to Notifications: ${clientId} (Paper: ${isPaper})`);
 
     ws.on('close', () => {
       connectedClients.delete(clientId);

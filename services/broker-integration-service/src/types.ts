@@ -5,6 +5,8 @@ export interface OrderRequest {
     price?: number;
     idempotencyKey: string;
     userId: string;
+    memo?: string;
+    isPaper?: boolean;
 }
 
 export interface OrderResponse {
@@ -12,6 +14,7 @@ export interface OrderResponse {
     orderId?: string;
     broker: string;
     reason?: string;
+    memo?: string;
     executedPrice?: number;
     timestamp: string;
 }

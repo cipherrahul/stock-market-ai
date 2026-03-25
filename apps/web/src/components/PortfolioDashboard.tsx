@@ -8,11 +8,12 @@ import { useRealtimePortfolio, useRealtimeOrders } from '@/hooks/useRealtime';
 interface PortfolioDashboardProps {
   token: string;
   userId: string;
+  isPaper?: boolean;
 }
 
-export function PortfolioDashboard({ token, userId }: PortfolioDashboardProps) {
-  const { portfolio, connected: portfolioConnected, error: portfolioError } = useRealtimePortfolio(token, userId);
-  const { orders, connected: ordersConnected } = useRealtimeOrders(token);
+export function PortfolioDashboard({ token, userId, isPaper = false }: PortfolioDashboardProps) {
+  const { portfolio, connected: portfolioConnected, error: portfolioError } = useRealtimePortfolio(token, userId, isPaper);
+  const { orders, connected: ordersConnected } = useRealtimeOrders(token, isPaper);
 
   return (
     <div className="space-y-10">
@@ -51,13 +52,23 @@ export function PortfolioDashboard({ token, userId }: PortfolioDashboardProps) {
 
              {portfolio ? (
                <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                 <div className="p-10 bg-white/[0.02] rounded-[2.5rem] border border-white/5 group hover:bg-white/[0.04] transition-all">
-                   <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-3">Net Asset Value</p>
-                   <p className="text-5xl font-black italic tracking-tighter">
-                     ₹{portfolio.totalValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-                     <span className="text-xl font-mono opacity-20">.{Math.round((portfolio.totalValue % 1) * 100)}</span>
-                   </p>
-                 </div>
+                  <div className="p-10 bg-white/[0.02] rounded-[2.5rem] border border-white/5 group hover:bg-white/[0.04] transition-all">
+                    <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-3">Unified Liquidity</p>
+                    <div className="space-y-4">
+                      {portfolio.balances ? portfolio.balances.map((b: any) => (
+                        <div key={b.currency} className="flex justify-between items-end">
+                           <span className="text-[10px] font-bold text-slate-600">{b.currency}</span>
+                           <p className="text-3xl font-black italic tracking-tighter">
+                             {b.currency === 'INR' ? '₹' : '$'}{ (Number(b.cash) / 100).toLocaleString(b.currency === 'INR' ? 'en-IN' : 'en-US') }
+                           </p>
+                        </div>
+                      )) : (
+                        <p className="text-5xl font-black italic tracking-tighter">
+                          ₹{portfolio.totalValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                        </p>
+                      )}
+                    </div>
+                  </div>
 
                  <div className="p-10 bg-white/[0.02] rounded-[2.5rem] border border-white/5 group hover:bg-white/[0.04] transition-all">
                    <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-3">Absolute Gain</p>
@@ -122,10 +133,15 @@ export function PortfolioDashboard({ token, userId }: PortfolioDashboardProps) {
                             </span>
                             <span className="text-sm font-black italic uppercase tracking-tighter text-slate-300">{order.symbol || 'SYSTEM'}</span>
                         </div>
+                        {order.memo && (
+                          <p className="mt-2 text-[8px] font-bold text-blue-400/60 leading-tight italic max-w-[150px]">
+                            "{order.memo}"
+                          </p>
+                        )}
                       </div>
                       <div className="text-right">
                         <p className="text-sm font-black italic tracking-tighter">
-                            {order.executedPrice ? `₹${order.executedPrice.toLocaleString()}` : 'PENDING'}
+                            {order.executedPrice ? `${order.symbol?.match(/^[A-Z]{1,5}$/) && !['RELIANCE', 'TCS', 'INFY', 'WIPRO'].includes(order.symbol) ? '$' : '₹'}${order.executedPrice.toLocaleString()}` : 'PENDING'}
                         </p>
                         <p className="text-[8px] font-bold text-slate-600 uppercase italic">
                             {new Date(order.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
@@ -186,11 +202,15 @@ export function PortfolioDashboard({ token, userId }: PortfolioDashboardProps) {
                 <div className="space-y-4">
                     <div className="flex justify-between items-end border-b border-white/5 pb-4">
                         <span className="text-[9px] font-black text-slate-600 uppercase tracking-widest">Value (Spot)</span>
-                        <p className="text-xl font-black italic tracking-tighter">₹{position.currentPrice.toLocaleString()}</p>
+                        <p className="text-xl font-black italic tracking-tighter">
+                            {['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'TSLA', 'META'].includes(position.symbol) ? '$' : '₹'}{position.currentPrice.toLocaleString()}
+                        </p>
                     </div>
                     <div className="flex justify-between items-end pt-2">
                         <span className="text-[9px] font-black text-slate-600 uppercase tracking-widest">Cost Basis</span>
-                        <p className="text-sm font-bold text-slate-500">₹{position.avgCost.toFixed(1)}</p>
+                        <p className="text-sm font-bold text-slate-500">
+                            {['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'TSLA', 'META'].includes(position.symbol) ? '$' : '₹'}{position.avgCost.toFixed(1)}
+                        </p>
                     </div>
                 </div>
               </MotionDiv>

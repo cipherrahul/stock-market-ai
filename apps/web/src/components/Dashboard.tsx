@@ -8,6 +8,7 @@ import { AlphaInsights } from './AlphaInsights';
 import { PortfolioDashboard } from './PortfolioDashboard';
 import { TradingPanelRealtime } from './TradingPanelRealtime';
 import { PriceTicker } from './PriceTicker';
+import { PaymentPanel } from './PaymentPanel';
 
 export const Dashboard: React.FC = () => {
   const token = typeof localStorage !== 'undefined' ? localStorage.getItem('token') || '' : '';
@@ -15,6 +16,10 @@ export const Dashboard: React.FC = () => {
 
   const { regime, sentiment } = useRealtimeAlpha(token);
   const { isPanicking, resetPanic } = usePanicMonitor();
+  const [isPaper, setIsPaper] = React.useState(false);
+
+  // Dynamic Theme based on sentiment
+  const themeGlow = sentiment > 0.6 ? 'shadow-[0_0_50px_rgba(16,185,129,0.1)]' : sentiment < 0.4 ? 'shadow-[0_0_50px_rgba(139,92,246,0.1)]' : 'shadow-[0_0_50px_rgba(99,102,241,0.1)]';
 
   return (
     <div className="min-h-screen bg-[#020617] text-slate-50 font-sans selection:bg-indigo-500/30">
@@ -40,12 +45,25 @@ export const Dashboard: React.FC = () => {
               </h1>
             </div>
 
-            <div className="flex items-center gap-8 bg-white/[0.02] p-6 rounded-[2rem] border border-white/5 backdrop-blur-md">
+            <div className={`flex items-center gap-8 bg-white/[0.02] p-6 rounded-[2rem] border border-white/5 backdrop-blur-md transition-all ${themeGlow}`}>
+               {/* MODE TOGGLE */}
+               <div className="flex flex-col gap-2">
+                  <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest text-center">Protocol Mode</p>
+                  <button 
+                    onClick={() => setIsPaper(!isPaper)}
+                    className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all border ${isPaper ? 'bg-amber-500/10 border-amber-500/30 text-amber-400' : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'}`}
+                  >
+                    {isPaper ? 'SHADOW_TRADING' : 'LIVE_SOVEREIGN'}
+                  </button>
+               </div>
+               
+               <div className="h-10 w-[1px] bg-white/10" />
+
               <div className="text-right">
                 <p className="text-[10px] uppercase opacity-40 font-bold tracking-widest mb-1">Resiliency Delta</p>
                 <div className="flex items-center gap-2 justify-end">
-                  <span className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(99,102,241,0.5)]" />
-                  <span className="text-[10px] font-black font-mono opacity-80 uppercase">SHADOW: 99.9%</span>
+                  <span className={`w-2 h-2 rounded-full animate-pulse ${isPaper ? 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]' : 'bg-indigo-500 shadow-[0_0_8px_rgba(99,102,241,0.5)]'}`} />
+                  <span className="text-[10px] font-black font-mono opacity-80 uppercase">{isPaper ? 'SIMULATION: ON' : 'SHADOW: 99.9%'}</span>
                 </div>
               </div>
               <div className="h-10 w-[1px] bg-white/10" />
@@ -63,11 +81,12 @@ export const Dashboard: React.FC = () => {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
              <div className="lg:col-span-2 space-y-10">
                 <AlphaInsights regime={regime} sentimentScore={sentiment} portfolioHistory={[]} />
-                <PortfolioDashboard token={token} userId={userId} />
+                <PortfolioDashboard token={token} userId={userId} isPaper={isPaper} />
              </div>
              <div className="lg:col-span-1">
-                <div className="sticky top-10">
-                   <TradingPanelRealtime token={token} userId={userId} />
+                <div className="sticky top-10 space-y-10">
+                   <TradingPanelRealtime token={token} userId={userId} isPaper={isPaper} />
+                   <PaymentPanel token={token} userId={userId} />
                 </div>
              </div>
           </div>

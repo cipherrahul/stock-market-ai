@@ -79,7 +79,10 @@ app.get('/health', (req, res) => {
   res.json({ status: 'OK', service: 'market-data-service' });
 });
 
-const TRACKED_SYMBOLS = ['RELIANCE', 'TCS', 'INFY', 'WIPRO', 'AAPL', 'MSFT', 'GOOGL', 'AMZN'];
+const TRACKED_SYMBOLS = [
+  'RELIANCE', 'TCS', 'INFY', 'WIPRO', 'HDFCBANK', // India
+  'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'TSLA', 'META' // Global
+];
 
 async function startPriceBroadcast() {
   setInterval(async () => {
@@ -109,7 +112,9 @@ async function startPriceBroadcast() {
       // 2. Cache in Redis
       await redisClient.setEx(`market:${symbol}`, 60, JSON.stringify(marketData));
 
-      console.log(`📈 PRICE_TICKER: [${symbol}] ₹${price.toFixed(2)}`);
+      const isGlobal = !['RELIANCE', 'TCS', 'INFY', 'WIPRO', 'HDFCBANK'].includes(symbol);
+      const currencySymbol = isGlobal ? '$' : '₹';
+      console.log(`📈 PRICE_TICKER: [${symbol}] ${currencySymbol}${price.toFixed(2)}`);
     } catch (err) {
       console.error('Price broadcast failed:', err);
     }
