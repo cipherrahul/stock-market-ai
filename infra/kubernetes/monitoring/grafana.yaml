@@ -1,0 +1,437 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards
+  namespace: monitoring
+data:
+  service-metrics.json: |
+    {
+      "dashboard": {
+        "id": null,
+        "uid": "service-metrics",
+        "title": "Service Metrics",
+        "tags": ["services", "performance"],
+        "timezone": "browser",
+        "schemaVersion": 27,
+        "refresh": "30s",
+        "time": { "from": "now-6h", "to": "now" },
+        "panels": [
+          {
+            "id": 1,
+            "title": "Request Rate (RPS)",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "sum(rate(http_requests_total[5m])) by (service)",
+                "legendFormat": "{{ service }}"
+              }
+            ],
+            "yaxes": [
+              { "label": "Requests/sec" }
+            ]
+          },
+          {
+            "id": 2,
+            "title": "Error Rate",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "(sum(rate(http_requests_total{status=~\"5..\"}[5m])) by (service) / sum(rate(http_requests_total[5m])) by (service)) * 100",
+                "legendFormat": "{{ service }}"
+              }
+            ],
+            "yaxes": [
+              { "label": "Error %" }
+            ]
+          },
+          {
+            "id": 3,
+            "title": "Latency (P95)",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) by (service)",
+                "legendFormat": "{{ service }}"
+              }
+            ],
+            "yaxes": [
+              { "label": "Duration (s)" }
+            ]
+          },
+          {
+            "id": 4,
+            "title": "Active Requests",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "sum(http_requests_in_progress) by (service)",
+                "legendFormat": "{{ service }}"
+              }
+            ]
+          }
+        ]
+      }
+    }
+
+  database-metrics.json: |
+    {
+      "dashboard": {
+        "id": null,
+        "uid": "database-metrics",
+        "title": "Database Metrics",
+        "tags": ["database", "postgresql"],
+        "timezone": "browser",
+        "schemaVersion": 27,
+        "refresh": "30s",
+        "time": { "from": "now-6h", "to": "now" },
+        "panels": [
+          {
+            "id": 1,
+            "title": "Active Connections",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "pg_stat_activity_count"
+              }
+            ],
+            "thresholds": "80,95"
+          },
+          {
+            "id": 2,
+            "title": "Queries Per Second",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "rate(pg_stat_statements_sum_time[1m]) / 1000000"
+              }
+            ]
+          },
+          {
+            "id": 3,
+            "title": "Query Latency",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "pg_stat_statements_mean_time"
+              }
+            ],
+            "yaxes": [
+              { "label": "Duration (ms)" }
+            ]
+          },
+          {
+            "id": 4,
+            "title": "Cache Hit Ratio",
+            "type": "gauge",
+            "targets": [
+              {
+                "expr": "(1 - (pg_stat_database_blks_read / (pg_stat_database_blks_read + pg_stat_database_blks_hit))) * 100"
+              }
+            ]
+          },
+          {
+            "id": 5,
+            "title": "Database Size",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "pg_database_size_bytes / 1024 / 1024 / 1024"
+              }
+            ],
+            "unit": "GB"
+          },
+          {
+            "id": 6,
+            "title": "Slow Queries (>1s)",
+            "type": "table",
+            "targets": [
+              {
+                "expr": "pg_stat_statements_mean_time > 1000"
+              }
+            ]
+          }
+        ]
+      }
+    }
+
+  infrastructure-metrics.json: |
+    {
+      "dashboard": {
+        "id": null,
+        "uid": "infrastructure-metrics",
+        "title": "Infrastructure Metrics",
+        "tags": ["infrastructure", "kubernetes", "nodes"],
+        "timezone": "browser",
+        "schemaVersion": 27,
+        "refresh": "30s",
+        "time": { "from": "now-6h", "to": "now" },
+        "panels": [
+          {
+            "id": 1,
+            "title": "CPU Usage by Node",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "(1 - avg (rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) by (instance)) * 100",
+                "legendFormat": "{{ instance }}"
+              }
+            ],
+            "yaxes": [
+              { "label": "CPU %" }
+            ],
+            "thresholds": "70,90"
+          },
+          {
+            "id": 2,
+            "title": "Memory Usage by Node",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "((1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100)",
+                "legendFormat": "{{ instance }}"
+              }
+            ],
+            "yaxes": [
+              { "label": "Memory %" }
+            ],
+            "thresholds": "70,90"
+          },
+          {
+            "id": 3,
+            "title": "Disk Usage by Node",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "((1 - (node_filesystem_avail_bytes{fstype!=\"tmpfs\", mountpoint=\"/\"} / node_filesystem_size_bytes{fstype!=\"tmpfs\", mountpoint=\"/\"})) * 100)",
+                "legendFormat": "{{ instance }}"
+              }
+            ],
+            "yaxes": [
+              { "label": "Disk %" }
+            ],
+            "thresholds": "80,90"
+          },
+          {
+            "id": 4,
+            "title": "Network I/O",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "rate(node_network_transmit_bytes_total[5m])",
+                "legendFormat": "{{ instance }} out"
+              },
+              {
+                "expr": "rate(node_network_receive_bytes_total[5m])",
+                "legendFormat": "{{ instance }} in"
+              }
+            ]
+          },
+          {
+            "id": 5,
+            "title": "Pod Memory Usage",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "sum(container_memory_usage_bytes{pod!=\"\"}) by (pod)",
+                "legendFormat": "{{ pod }}"
+              }
+            ],
+            "yaxes": [
+              { "label": "Memory (bytes)" }
+            ]
+          },
+          {
+            "id": 6,
+            "title": "Pod CPU Usage",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "rate(container_cpu_usage_seconds_total{pod!=\"\"}[5m])",
+                "legendFormat": "{{ pod }}"
+              }
+            ]
+          }
+        ]
+      }
+    }
+
+  trading-metrics.json: |
+    {
+      "dashboard": {
+        "id": null,
+        "uid": "trading-metrics",
+        "title": "Trading Metrics",
+        "tags": ["trading", "business"],
+        "timezone": "browser",
+        "schemaVersion": 27,
+        "refresh": "30s",
+        "time": { "from": "now-1d", "to": "now" },
+        "panels": [
+          {
+            "id": 1,
+            "title": "Orders Executed (24h)",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "sum(increase(trading_orders_executed_total[24h]))"
+              }
+            ]
+          },
+          {
+            "id": 2,
+            "title": "Orders Failed (24h)",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "sum(increase(trading_orders_failed_total[24h]))"
+              }
+            ]
+          },
+          {
+            "id": 3,
+            "title": "Total Trading Volume (24h)",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "sum(increase(trading_volume_total[24h]))"
+              }
+            ],
+            "unit": "USD"
+          },
+          {
+            "id": 4,
+            "title": "Average Trade Value",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "sum(increase(trading_value_total[24h])) / sum(increase(trading_orders_executed_total[24h]))"
+              }
+            ],
+            "unit": "USD"
+          },
+          {
+            "id": 5,
+            "title": "Success Rate",
+            "type": "gauge",
+            "targets": [
+              {
+                "expr": "(sum(increase(trading_orders_executed_total[24h])) / (sum(increase(trading_orders_executed_total[24h])) + sum(increase(trading_orders_failed_total[24h])))) * 100"
+              }
+            ],
+            "unit": "%"
+          },
+          {
+            "id": 6,
+            "title": "Orders Over Time",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "rate(trading_orders_executed_total[1h])",
+                "legendFormat": "Executed"
+              },
+              {
+                "expr": "rate(trading_orders_failed_total[1h])",
+                "legendFormat": "Failed"
+              }
+            ]
+          }
+        ]
+      }
+    }
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: monitoring
+  labels:
+    app: grafana
+spec:
+  type: LoadBalancer
+  ports:
+    - port: 80
+      targetPort: 3000
+      name: web
+  selector:
+    app: grafana
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: monitoring
+  labels:
+    app: grafana
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      containers:
+        - name: grafana
+          image: grafana/grafana:latest
+          ports:
+            - containerPort: 3000
+          env:
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-admin
+                  key: password
+            - name: GF_USERS_ALLOW_SIGN_UP
+              value: "false"
+            - name: GF_AUTH_BASIC_ENABLED
+              value: "true"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: storage
+              mountPath: /var/lib/grafana
+            - name: dashboards
+              mountPath: /etc/grafana/provisioning/dashboards
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+
+      volumes:
+        - name: storage
+          persistentVolumeClaim:
+            claimName: grafana-storage
+        - name: dashboards
+          configMap:
+            name: grafana-dashboards
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: grafana-storage
+  namespace: monitoring
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi

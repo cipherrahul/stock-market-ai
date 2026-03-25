@@ -1,0 +1,359 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: monitoring
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+      external_labels:
+        monitor: 'stock-market-agent'
+        environment: 'production'
+
+    # Alertmanager configuration
+    alerting:
+      alertmanagers:
+        - static_configs:
+            - targets:
+                - alertmanager:9093
+
+    # Load rules once and periodically evaluate them
+    rule_files:
+      - '/etc/prometheus/alert_rules.yml'
+      - '/etc/prometheus/record_rules.yml'
+
+    scrape_configs:
+      # Prometheus self-monitoring
+      - job_name: 'prometheus'
+        static_configs:
+          - targets: ['localhost:9090']
+
+      # Kubernetes metrics
+      - job_name: 'kubernetes-apiservers'
+        kubernetes_sd_configs:
+          - role: endpoints
+        scheme: https
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
+            action: keep
+            regex: default;kubernetes;https
+
+      # Auth Service metrics
+      - job_name: 'auth-service'
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names:
+                - production
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            action: keep
+            regex: auth-service
+          - source_labels: [__meta_kubernetes_pod_ip]
+            action: replace
+            target_label: __address__
+            regex: ([^:]+)(?::\d+)?
+            replacement: $1:9090
+
+      # Portfolio Service metrics
+      - job_name: 'portfolio-service'
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names:
+                - production
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            action: keep
+            regex: portfolio-service
+          - source_labels: [__meta_kubernetes_pod_ip]
+            action: replace
+            target_label: __address__
+            regex: ([^:]+)(?::\d+)?
+            replacement: $1:9090
+
+      # Trading Engine metrics
+      - job_name: 'trading-engine-service'
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names:
+                - production
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            action: keep
+            regex: trading-engine-service
+          - source_labels: [__meta_kubernetes_pod_ip]
+            action: replace
+            target_label: __address__
+            regex: ([^:]+)(?::\d+)?
+            replacement: $1:9090
+
+      # API Gateway metrics
+      - job_name: 'api-gateway'
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names:
+                - production
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            action: keep
+            regex: api-gateway
+          - source_labels: [__meta_kubernetes_pod_ip]
+            action: replace
+            target_label: __address__
+            regex: ([^:]+)(?::\d+)?
+            replacement: $1:9090
+
+      # PostgreSQL metrics (via postgres_exporter)
+      - job_name: 'postgresql'
+        static_configs:
+          - targets: ['postgres-exporter:9187']
+
+      # Redis metrics (via redis_exporter)
+      - job_name: 'redis'
+        static_configs:
+          - targets: ['redis-exporter:9121']
+
+      # Node metrics
+      - job_name: 'node'
+        kubernetes_sd_configs:
+          - role: node
+        relabel_configs:
+          - action: labelmap
+            regex: __meta_kubernetes_node_label_(.+)
+          - source_labels: [__meta_kubernetes_node_name]
+            action: replace
+            target_label: node
+
+  alert_rules.yml: |
+    groups:
+      - name: stock-market-agent
+        interval: 30s
+        rules:
+          # High error rate alert
+          - alert: HighErrorRate
+            expr: |
+              (sum(rate(http_requests_total{status=~"5.."}[5m])) by (service) /
+               sum(rate(http_requests_total[5m])) by (service)) > 0.05
+            for: 5m
+            annotations:
+              summary: "High error rate on {{ $labels.service }}"
+              description: "Error rate is {{ $value | humanizePercentage }}"
+
+          # High latency alert
+          - alert: HighLatency
+            expr: |
+              histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 1
+            for: 5m
+            annotations:
+              summary: "High latency on {{ $labels.service }}"
+              description: "P95 latency is {{ $value }}s"
+
+          # Service down alert
+          - alert: ServiceDown
+            expr: up{job=~"auth-service|portfolio-service|trading-engine-service"} == 0
+            for: 2m
+            annotations:
+              summary: "Service {{ $labels.job }} is down"
+              description: "Service has been down for more than 2 minutes"
+
+          # Database connection pool exhausted
+          - alert: DatabaseConnectionPoolExhausted
+            expr: pg_stat_activity_count > 90
+            for: 5m
+            annotations:
+              summary: "Database connection pool exhausted"
+              description: "{{ $value }} connections in use"
+
+          # Memory usage high
+          - alert: HighMemoryUsage
+            expr: (container_memory_usage_bytes / container_spec_memory_limit_bytes) > 0.9
+            for: 5m
+            annotations:
+              summary: "High memory usage on {{ $labels.pod }}"
+              description: "Memory usage is {{ $value | humanizePercentage }}"
+
+          # CPU usage high
+          - alert: HighCPUUsage
+            expr: rate(container_cpu_usage_seconds_total[5m]) > 0.9
+            for: 5m
+            annotations:
+              summary: "High CPU usage on {{ $labels.pod }}"
+              description: "CPU usage is {{ $value | humanizePercentage }}"
+
+          # Disk space low
+          - alert: LowDiskSpace
+            expr: (node_filesystem_avail_bytes / node_filesystem_size_bytes) < 0.1
+            for: 5m
+            annotations:
+              summary: "Low disk space on {{ $labels.device }}"
+              description: "Only {{ $value | humanizePercentage }} available"
+
+  record_rules.yml: |
+    groups:
+      - name: recording_rules
+        interval: 15s
+        rules:
+          # Service request rate
+          - record: service:request_rate:5m
+            expr: sum(rate(http_requests_total[5m])) by (service)
+
+          # Service error rate
+          - record: service:error_rate:5m
+            expr: sum(rate(http_requests_total{status=~"5.."}[5m])) by (service)
+
+          # Service latency
+          - record: service:latency:p95
+            expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) by (service)
+
+          # Database queries per second
+          - record: database:queries:1m
+            expr: sum(rate(db_query_total[1m])) by (query_type)
+
+          # Active database connections
+          - record: database:connections:instant
+            expr: pg_stat_activity_count
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  namespace: monitoring
+  labels:
+    app: prometheus
+spec:
+  type: ClusterIP
+  ports:
+    - port: 9090
+      targetPort: 9090
+      name: web
+  selector:
+    app: prometheus
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: monitoring
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: prometheus
+  template:
+    metadata:
+      labels:
+        app: prometheus
+    spec:
+      serviceAccountName: prometheus
+      containers:
+        - name: prometheus
+          image: prom/prometheus:latest
+          args:
+            - '--config.file=/etc/prometheus/prometheus.yml'
+            - '--storage.tsdb.path=/prometheus'
+            - '--storage.tsdb.retention.time=30d'
+            - '--web.enable-lifecycle'
+          ports:
+            - containerPort: 9090
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: 2000m
+              memory: 4Gi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus
+            - name: storage
+              mountPath: /prometheus
+            - name: alert-rules
+              mountPath: /etc/prometheus/rules
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: 9090
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: 9090
+            initialDelaySeconds: 5
+            periodSeconds: 5
+
+      volumes:
+        - name: config
+          configMap:
+            name: prometheus-config
+        - name: alert-rules
+          emptyDir: {}
+        - name: storage
+          persistentVolumeClaim:
+            claimName: prometheus-storage
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: prometheus-storage
+  namespace: monitoring
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 50Gi
+  storageClassName: fast-ssd
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus
+  namespace: monitoring
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: prometheus
+rules:
+  - apiGroups: ['']
+    resources:
+      - nodes
+      - nodes/proxy
+      - pods
+      - endpoints
+      - services
+    verbs: ['get', 'list', 'watch']
+  - apiGroups:
+      - extensions
+    resources:
+      - ingresses
+    verbs: ['get', 'list', 'watch']
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: prometheus
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: prometheus
+subjects:
+  - kind: ServiceAccount
+    name: prometheus
+    namespace: monitoring

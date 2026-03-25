@@ -1,0 +1,250 @@
+---
+# API Gateway Kubernetes Deployment
+# Version: 1.0.0
+# Purpose: Main entry point for all API requests
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: api-gateway
+  namespace: trading-platform
+  labels:
+    app: api-gateway
+    version: v1
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway
+  namespace: trading-platform
+  labels:
+    app: api-gateway
+    version: v1
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: api-gateway
+  template:
+    metadata:
+      labels:
+        app: api-gateway
+        version: v1
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3000"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: api-gateway
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - api-gateway
+              topologyKey: kubernetes.io/hostname
+      containers:
+      - name: api-gateway
+        image: trading-platform/api-gateway:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 3000
+          protocol: TCP
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: SERVICE_NAME
+          value: "api-gateway"
+        - name: SERVICE_PORT
+          value: "3000"
+        - name: LOG_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: trading-config
+              key: LOG_LEVEL
+        - name: CORS_ORIGINS
+          value: "https://app.trading-platform.local,https://admin.trading-platform.local"
+        - name: RATE_LIMIT_WINDOW_MS
+          value: "900000"  # 15 minutes
+        - name: RATE_LIMIT_MAX_REQUESTS
+          value: "1000"  # Global limit
+        - name: AUTH_SERVICE_URL
+          value: "http://auth-service:3001"
+        - name: PORTFOLIO_SERVICE_URL
+          value: "http://portfolio-service:3005"
+        - name: TRADING_ENGINE_URL
+          value: "http://trading-engine-service:3006"
+        - name: MARKET_DATA_URL
+          value: "http://market-data-service:3003"
+        - name: RISK_MANAGER_URL
+          value: "http://risk-management-service:3010"
+        - name: SENTIMENT_SERVICE_URL
+          value: "http://sentiment-service:3011"
+        - name: NOTIFICATION_SERVICE_URL
+          value: "http://notification-service:3009"
+        - name: TRADER_TIMEOUT_MS
+          value: "10000"  # 10 seconds
+        - name: CIRCUIT_BREAKER_THRESHOLD
+          value: "5"
+        - name: CIRCUIT_BREAKER_TIMEOUT_MS
+          value: "60000"
+        - name: REDIS_HOST
+          value: redis.trading-platform.svc.cluster.local
+        - name: REDIS_PORT
+          value: "6379"
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: trading-secrets
+              key: JWT_SECRET
+        - name: METRICS_ENABLED
+          value: "true"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2
+        startupProbe:
+          httpGet:
+            path: /health
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 0
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 10
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: logs
+          mountPath: /var/log
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      - name: logs
+        emptyDir: {}
+      terminationGracePeriodSeconds: 30
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-gateway
+  namespace: trading-platform
+  labels:
+    app: api-gateway
+spec:
+  type: ClusterIP
+  ports:
+  - name: http
+    port: 3000
+    targetPort: http
+    protocol: TCP
+  selector:
+    app: api-gateway
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 3600
+
+---
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api-gateway-hpa
+  namespace: trading-platform
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api-gateway
+  minReplicas: 3
+  maxReplicas: 15
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 15
+      - type: Pods
+        value: 2
+        periodSeconds: 15
+      selectPolicy: Max
+
+---
+
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: api-gateway-pdb
+  namespace: trading-platform
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: api-gateway

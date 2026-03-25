@@ -1,0 +1,212 @@
+---
+# Portfolio Service Kubernetes Deployment
+# Version: 1.0.0
+# Purpose: Manage user portfolios and positions
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: portfolio-service
+  namespace: trading-platform
+  labels:
+    app: portfolio-service
+    version: v1
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: portfolio-service
+  namespace: trading-platform
+  labels:
+    app: portfolio-service
+    version: v1
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: portfolio-service
+  template:
+    metadata:
+      labels:
+        app: portfolio-service
+        version: v1
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3005"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: portfolio-service
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - portfolio-service
+              topologyKey: kubernetes.io/hostname
+      containers:
+      - name: portfolio-service
+        image: trading-platform/portfolio-service:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 3005
+          protocol: TCP
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: SERVICE_NAME
+          value: "portfolio-service"
+        - name: SERVICE_PORT
+          value: "3005"
+        - name: LOG_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: trading-config
+              key: LOG_LEVEL
+        - name: DB_HOST
+          value: postgres.trading-platform.svc.cluster.local
+        - name: DB_PORT
+          value: "5432"
+        - name: DB_USER
+          value: trading_user
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: trading-secrets
+              key: DB_PASSWORD
+        - name: DB_NAME
+          value: trading_platform
+        - name: DB_POOL_MIN
+          value: "5"
+        - name: DB_POOL_MAX
+          value: "20"
+        - name: REDIS_HOST
+          value: redis.trading-platform.svc.cluster.local
+        - name: REDIS_PORT
+          value: "6379"
+        - name: AUTH_SERVICE_URL
+          value: "http://auth-service:3001"
+        - name: KAFKA_BROKERS
+          value: "kafka:9092"
+        - name: KAFKA_GROUP_ID
+          value: "portfolio-service"
+        - name: METRICS_ENABLED
+          value: "true"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: logs
+          mountPath: /var/log
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      - name: logs
+        emptyDir: {}
+      terminationGracePeriodSeconds: 30
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: portfolio-service
+  namespace: trading-platform
+  labels:
+    app: portfolio-service
+spec:
+  type: ClusterIP
+  ports:
+  - name: http
+    port: 3005
+    targetPort: http
+    protocol: TCP
+  selector:
+    app: portfolio-service
+
+---
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: portfolio-service-hpa
+  namespace: trading-platform
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: portfolio-service
+  minReplicas: 3
+  maxReplicas: 8
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 75
+
+---
+
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: portfolio-service-pdb
+  namespace: trading-platform
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: portfolio-service

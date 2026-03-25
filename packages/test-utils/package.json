@@ -1,7 +1,7 @@
 {
-  "name": "@trading-platform/logger",
+  "name": "test-utils",
   "version": "1.0.0",
-  "description": "Centralized logging service with Winston and structured JSON formatting",
+  "description": "Shared testing utilities and fixtures",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
@@ -14,15 +14,14 @@
   },
   "dependencies": {
     "express": "^4.18.2",
-    "winston": "^3.11.0",
-    "winston-daily-rotate-file": "^4.7.1"
+    "pg": "^8.11.3",
+    "supertest": "^6.3.3"
   },
   "devDependencies": {
-    "@types/express": "^4.17.21",
+    "@types/jest": "^29.5.8",
     "@types/node": "^20.10.4",
+    "@types/supertest": "^2.0.16",
+    "jest": "^29.7.0",
     "typescript": "^5.3.3"
-  },
-  "engines": {
-    "node": ">=18.0.0"
   }
 }

@@ -1,0 +1,256 @@
+---
+# Trading Engine Service Kubernetes Deployment
+# Version: 1.0.0
+# Purpose: Execute trades and manage order lifecycle
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: trading-engine-service
+  namespace: trading-platform
+  labels:
+    app: trading-engine-service
+    version: v1
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trading-engine-service
+  namespace: trading-platform
+  labels:
+    app: trading-engine-service
+    version: v1
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: trading-engine-service
+  template:
+    metadata:
+      labels:
+        app: trading-engine-service
+        version: v1
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3006"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: trading-engine-service
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - trading-engine-service
+              topologyKey: kubernetes.io/hostname
+      containers:
+      - name: trading-engine-service
+        image: trading-platform/trading-engine-service:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 3006
+          protocol: TCP
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: SERVICE_NAME
+          value: "trading-engine-service"
+        - name: SERVICE_PORT
+          value: "3006"
+        - name: LOG_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: trading-config
+              key: LOG_LEVEL
+        - name: DB_HOST
+          value: postgres.trading-platform.svc.cluster.local
+        - name: DB_PORT
+          value: "5432"
+        - name: DB_USER
+          value: trading_user
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: trading-secrets
+              key: DB_PASSWORD
+        - name: DB_NAME
+          value: trading_platform
+        - name: DB_POOL_MIN
+          value: "10"
+        - name: DB_POOL_MAX
+          value: "30"
+        - name: REDIS_HOST
+          value: redis.trading-platform.svc.cluster.local
+        - name: REDIS_PORT
+          value: "6379"
+        - name: KAFKA_BROKERS
+          value: "kafka:9092"
+        - name: KAFKA_GROUP_ID
+          value: "trading-engine-service"
+        - name: AUTH_SERVICE_URL
+          value: "http://auth-service:3001"
+        - name: RISK_MANAGER_URL
+          value: "http://risk-management-service:3010"
+        - name: ZERODHA_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: trading-secrets
+              key: ZERODHA_API_KEY
+        - name: ZERODHA_ACCESS_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: trading-secrets
+              key: ZERODHA_ACCESS_TOKEN
+        - name: MAX_POSITION_SIZE
+          valueFrom:
+            configMapKeyRef:
+              name: trading-config
+              key: MAX_POSITION_SIZE
+        - name: MAX_DAILY_LOSS
+          valueFrom:
+            configMapKeyRef:
+              name: trading-config
+              key: MAX_DAILY_LOSS
+        - name: SLIPPAGE_TOLERANCE
+          value: "0.02"  # 2%
+        - name: EXECUTION_TIMEOUT_MS
+          value: "30000"  # 30 seconds
+        - name: METRICS_ENABLED
+          value: "true"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 40
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 15
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "750m"
+          limits:
+            memory: "1Gi"
+            cpu: "1500m"
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: logs
+          mountPath: /var/log
+        - name: cache
+          mountPath: /var/cache
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      - name: logs
+        emptyDir: {}
+      - name: cache
+        emptyDir: {}
+      terminationGracePeriodSeconds: 45
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: trading-engine-service
+  namespace: trading-platform
+  labels:
+    app: trading-engine-service
+spec:
+  type: ClusterIP
+  ports:
+  - name: http
+    port: 3006
+    targetPort: http
+    protocol: TCP
+  selector:
+    app: trading-engine-service
+
+---
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: trading-engine-service-hpa
+  namespace: trading-platform
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: trading-engine-service
+  minReplicas: 3
+  maxReplicas: 12
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 75
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 30
+      selectPolicy: Max
+
+---
+
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: trading-engine-service-pdb
+  namespace: trading-platform
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: trading-engine-service

@@ -1,0 +1,254 @@
+name: Build & Deploy
+
+on:
+  workflow_run:
+    workflows: ["Tests & Code Quality"]
+    types:
+      - completed
+    branches:
+      - main
+      - develop
+
+jobs:
+  build:
+    name: Build All Services
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    strategy:
+      matrix:
+        service:
+          - { name: 'auth-service', path: 'services/auth-service' }
+          - { name: 'api-gateway', path: 'apps/gateway' }
+          - { name: 'portfolio-service', path: 'services/portfolio-service' }
+          - { name: 'trading-engine-service', path: 'services/trading-engine-service' }
+          - { name: 'notification-service', path: 'services/notification-service' }
+          - { name: 'market-data-service', path: 'services/market-data-service' }
+          - { name: 'risk-management-service', path: 'services/risk-management-service' }
+          - { name: 'web', path: 'apps/web' }
+    permissions:
+      contents: read
+      packages: write
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      
+      - name: Log in to Docker Registry
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+      
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: ${{ secrets.DOCKER_USERNAME }}/${{ matrix.service.name }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix={{branch}}-
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+      
+      - name: Build and push
+        uses: docker/build-push-action@v4
+        with:
+          context: ${{ matrix.service.path }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/develop'
+    environment:
+      name: staging
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configure kubectl
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBE_CONFIG_STAGING }}" | base64 -d > $HOME/.kube/config
+          chmod 600 $HOME/.kube/config
+      
+      - name: Get image tags
+        id: tags
+        run: |
+          echo "auth_tag=${{ github.sha }}" >> $GITHUB_OUTPUT
+          echo "gateway_tag=${{ github.sha }}" >> $GITHUB_OUTPUT
+          echo "portfolio_tag=${{ github.sha }}" >> $GITHUB_OUTPUT
+          echo "trading_tag=${{ github.sha }}" >> $GITHUB_OUTPUT
+      
+      - name: Deploy services
+        run: |
+          kubectl set image deployment/auth-service \
+            auth-service=${{ secrets.DOCKER_USERNAME }}/auth-service:${{ steps.tags.outputs.auth_tag }} \
+            -n staging --record
+          
+          kubectl set image deployment/api-gateway \
+            api-gateway=${{ secrets.DOCKER_USERNAME }}/api-gateway:${{ steps.tags.outputs.gateway_tag }} \
+            -n staging --record
+          
+          kubectl set image deployment/portfolio-service \
+            portfolio-service=${{ secrets.DOCKER_USERNAME }}/portfolio-service:${{ steps.tags.outputs.portfolio_tag }} \
+            -n staging --record
+          
+          kubectl set image deployment/trading-engine-service \
+            trading-engine=${{ secrets.DOCKER_USERNAME }}/trading-engine-service:${{ steps.tags.outputs.trading_tag }} \
+            -n staging --record
+      
+      - name: Wait for rollout
+        run: |
+          kubectl rollout status deployment/auth-service -n staging --timeout=5m
+          kubectl rollout status deployment/api-gateway -n staging --timeout=5m
+          kubectl rollout status deployment/portfolio-service -n staging --timeout=5m
+          kubectl rollout status deployment/trading-engine-service -n staging --timeout=5m
+      
+      - name: Run health checks
+        run: |
+          curl -f https://staging.stockmarketagent.com/health || exit 1
+      
+      - name: Notify Slack
+        if: always()
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "text": "Staging Deployment",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "${{ job.status == 'success' && '✅ Deployed to Staging' || '❌ Deployment failed' }}"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+
+  approval-production:
+    name: Request Production Approval
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    environment:
+      name: production-approval
+    steps:
+      - name: Deployment waiting for approval
+        run: echo "Waiting for production approval..."
+
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: approval-production
+    if: github.ref == 'refs/heads/main'
+    environment:
+      name: production
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configure kubectl
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBE_CONFIG_PRODUCTION }}" | base64 -d > $HOME/.kube/config
+          chmod 600 $HOME/.kube/config
+      
+      - name: Blue-Green Deployment
+        run: |
+          # TODO: Implement blue-green strategy
+          echo "Deploying blue environment..."
+          kubectl apply -f infra/kubernetes/deployments/blue/ -n production
+          
+          # Wait for blue to be healthy
+          kubectl rollout status StatefulSet/blue -n production --timeout=10m
+          
+          # Test blue environment
+          curl -f https://blue.stockmarketagent.com/health || exit 1
+          
+          # Switch traffic to blue (green)
+          kubectl apply -f infra/kubernetes/ingress-blue.yaml -n production
+          
+          # Cleanup old green
+          kubectl delete -f infra/kubernetes/deployments/green/ -n production || true
+      
+      - name: Smoke Tests
+        run: |
+          npm run test:smoke:production
+        env:
+          API_URL: https://stockmarketagent.com
+      
+      - name: Notify Slack
+        if: always()
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "text": "Production Deployment",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "${{ job.status == 'success' && '✅ Deployed to Production' || '❌ Production deployment failed' }}\n\n<https://grafana.stockmarketagent.com/d/dashboards|View Metrics>"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+
+  rollback:
+    name: Rollback on Failure
+    runs-on: ubuntu-latest
+    needs: deploy-production
+    if: failure()
+    environment:
+      name: production
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configure kubectl
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBE_CONFIG_PRODUCTION }}" | base64 -d > $HOME/.kube/config
+          chmod 600 $HOME/.kube/config
+      
+      - name: Rollback to previous version
+        run: |
+          kubectl rollout undo deployment/auth-service -n production
+          kubectl rollout undo deployment/api-gateway -n production
+          kubectl rollout undo deployment/portfolio-service -n production
+          kubectl rollout undo deployment/trading-engine-service -n production
+          
+          kubectl rollout status deployment/auth-service -n production --timeout=5m
+      
+      - name: Notify Slack
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "text": "🚨 Production Rollback Executed",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "Previous stable version restored. Check logs for details."
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK

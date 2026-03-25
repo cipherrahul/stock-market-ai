@@ -1,0 +1,278 @@
+---
+# RBAC for User Service (Minimal Permissions)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: user-service
+  namespace: production
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: user-service
+  namespace: production
+rules:
+  - apiGroups: ['']
+    resources: ['secrets']
+    resourceNames: ['user-service-db-credentials']
+    verbs: ['get']
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: user-service
+  namespace: production
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: user-service
+subjects:
+  - kind: ServiceAccount
+    name: user-service
+    namespace: production
+
+---
+# RBAC for Auth Service
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: auth-service
+  namespace: production
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: auth-service
+  namespace: production
+rules:
+  - apiGroups: ['']
+    resources: ['secrets']
+    resourceNames: ['auth-service-jwt-secret', 'auth-service-db-credentials']
+    verbs: ['get']
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: auth-service
+  namespace: production
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: auth-service
+subjects:
+  - kind: ServiceAccount
+    name: auth-service
+    namespace: production
+
+---
+# RBAC for Trading Engine Service
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: trading-engine-service
+  namespace: production
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: trading-engine-service
+  namespace: production
+rules:
+  - apiGroups: ['']
+    resources: ['secrets']
+    resourceNames: ['trading-engine-credentials']
+    verbs: ['get']
+  - apiGroups: ['']
+    resources: ['configmaps']
+    resourceNames: ['trading-engine-config']
+    verbs: ['get']
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: trading-engine-service
+  namespace: production
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: trading-engine-service
+subjects:
+  - kind: ServiceAccount
+    name: trading-engine-service
+    namespace: production
+
+---
+# RBAC for Portfolio Service
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: portfolio-service
+  namespace: production
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: portfolio-service
+  namespace: production
+rules:
+  - apiGroups: ['']
+    resources: ['secrets']
+    resourceNames: ['portfolio-service-credentials']
+    verbs: ['get']
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: portfolio-service
+  namespace: production
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: portfolio-service
+subjects:
+  - kind: ServiceAccount
+    name: portfolio-service
+    namespace: production
+
+---
+# Network Policy - Deny all ingress by default
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: production
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+
+---
+# Network Policy - Allow ingress to API Gateway
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-api-gateway
+  namespace: production
+spec:
+  podSelector:
+    matchLabels:
+      app: api-gateway
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: ingress-controller
+      ports:
+        - protocol: TCP
+          port: 3000
+
+---
+# Network Policy - Allow inter-service communication
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-inter-service
+  namespace: production
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 3000
+        - protocol: TCP
+          port: 9090
+
+---
+# Network Policy - Allow database access
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-database-access
+  namespace: production
+spec:
+  podSelector:
+    matchLabels:
+      app: postgres
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 5432
+
+---
+# Pod Security Policy - Restricted
+apiVersion: policy/v1beta1
+kind: PodSecurityPolicy
+metadata:
+  name: restricted
+spec:
+  privileged: false
+  allowPrivilegeEscalation: false
+  requiredDropCapabilities:
+    - ALL
+  volumes:
+    - 'configMap'
+    - 'emptyDir'
+    - 'projected'
+    - 'secret'
+    - 'downwardAPI'
+    - 'persistentVolumeClaim'
+  hostNetwork: false
+  hostIPC: false
+  hostPID: false
+  runAsUser:
+    rule: 'MustRunAsNonRoot'
+  seLinux:
+    rule: 'MustRunAs'
+    seLinuxOptions:
+      level: 's0:c0,c1'
+  fsGroup:
+    rule: 'MustRunAs'
+    ranges:
+      - min: 1
+        max: 65535
+  readOnlyRootFilesystem: false
+
+---
+# Cluster Role for Pod Security Policy
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: restricted-psp
+rules:
+  - apiGroups: ['policy']
+    resources: ['podsecuritypolicies']
+    verbs: ['use']
+    resourceNames: ['restricted']
+
+---
+# Cluster Role Binding for Pod Security Policy
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: restricted-psp
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: restricted-psp
+subjects:
+  - kind: Group
+    name: system:authenticated
+    apiGroup: rbac.authorization.k8s.io

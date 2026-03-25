@@ -1,0 +1,427 @@
+---
+# Advanced Horizontal Pod Autoscaling Configuration
+# Version: 1.0.0
+# Purpose: Auto-scale services based on CPU, memory, and custom metrics
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hpa-settings
+  namespace: trading-platform
+data:
+  # HPA behavior configuration
+  scale-up-stabilization-seconds: "0"
+  scale-down-stabilization-seconds: "300"
+  target-cpu-utilization-percentage: "70"
+  target-memory-utilization-percentage: "75"
+  
+  # Custom metrics thresholds
+  http-requests-per-second: "1000"
+  database-connection-pool-percentage: "80"
+  cache-hit-ratio-target: "90"
+  
+  # Scaling bounds
+  min-replicas: "3"
+  max-replicas-api-gateway: "15"
+  max-replicas-trading-engine: "12"
+  max-replicas-portfolio: "8"
+  max-replicas-auth: "10"
+
+---
+
+# API Gateway HPA with custom metrics
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api-gateway-hpa-advanced
+  namespace: trading-platform
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api-gateway
+  minReplicas: 3
+  maxReplicas: 15
+  metrics:
+  # Primary metric: CPU utilization
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  # Secondary metric: Memory utilization
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  # Custom metric: Requests per second
+  - type: Pods
+    pods:
+      metric:
+        name: http_requests_per_second
+      target:
+        type: AverageValue
+        averageValue: "1000"
+  behavior:
+    # Scale up aggressively
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 15
+      - type: Pods
+        value: 2
+        periodSeconds: 15
+      selectPolicy: Max
+    # Scale down conservatively
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+      - type: Pods
+        value: 1
+        periodSeconds: 60
+      selectPolicy: Min
+
+---
+
+# Trading Engine Service HPA
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: trading-engine-hpa-advanced
+  namespace: trading-platform
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: trading-engine-service
+  minReplicas: 3
+  maxReplicas: 12
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 75
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  - type: Pods
+    pods:
+      metric:
+        name: trades_executed_per_minute
+      target:
+        type: AverageValue
+        averageValue: "100"
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 30
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 120
+      selectPolicy: Min
+
+---
+
+# Portfolio Service HPA
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: portfolio-service-hpa-advanced
+  namespace: trading-platform
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: portfolio-service
+  minReplicas: 3
+  maxReplicas: 8
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 75
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+      - type: Percent
+        value: 80
+        periodSeconds: 30
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 90
+      selectPolicy: Min
+
+---
+
+# Auth Service HPA
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: auth-service-hpa-advanced
+  namespace: trading-platform
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: auth-service
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  - type: Pods
+    pods:
+      metric:
+        name: login_attempts_per_minute
+      target:
+        type: AverageValue
+        averageValue: "50"
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 15
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+      selectPolicy: Min
+
+---
+
+# Risk Management Service HPA
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: risk-management-hpa
+  namespace: trading-platform
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: risk-management-service
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 75
+
+---
+
+# Metrics Server (required for HPA to work)
+apiVersion: v1
+kind: Service
+metadata:
+  name: metrics-server
+  namespace: kube-system
+spec:
+  ports:
+  - port: 443
+    targetPort: 4443
+  selector:
+    k8s-app: metrics-server
+
+---
+
+# Custom Metrics ConfigMap for monitoring
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: custom-metrics-config
+  namespace: trading-platform
+data:
+  rules.yaml: |
+    groups:
+    - name: trading_platform_metrics
+      interval: 30s
+      rules:
+      
+      # API Gateway metrics
+      - record: api_gateway:http_requests_per_second
+        expr: rate(http_requests_total[1m])
+      
+      - record: api_gateway:http_error_rate
+        expr: rate(http_requests_total{status=~"5.."}[1m])
+      
+      - record: api_gateway:http_latency_p95
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))
+      
+      # Trading metrics
+      - record: trading:trades_per_minute
+        expr: rate(trading_orders_executed_total[1m])
+      
+      - record: trading:execution_success_rate
+        expr: rate(trading_orders_executed_total{status="success"}[5m]) / rate(trading_orders_total[5m])
+      
+      - record: trading:average_execution_price
+        expr: rate(trading_total_execution_value[5m]) / rate(trading_orders_executed_total[5m])
+      
+      # Database metrics
+      - record: database:connection_pool_utilization
+        expr: (pg_stat_activity_count / pg_settings_max_connections) * 100
+      
+      - record: database:query_latency_p95
+        expr: histogram_quantile(0.95, rate(pg_query_duration_seconds_bucket[5m]))
+      
+      - record: database:slow_queries_per_minute
+        expr: rate(pg_slow_queries_total[1m])
+      
+      # Portfolio metrics
+      - record: portfolio:rebalancing_operations_per_hour
+        expr: rate(portfolio_rebalancing_total[1h])
+      
+      # Risk metrics
+      - record: risk:positions_over_limit
+        expr: count(position_size_relative_to_portfolio > 0.1)
+      
+      - record: risk:portfolio_variance_alert
+        expr: count(portfolio_variance > 0.25)
+
+---
+
+# Prometheus Rules for HPA (ServiceMonitor)
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: hpa-alerts
+  namespace: trading-platform
+spec:
+  groups:
+  - name: hpa_scaling_alerts
+    interval: 30s
+    rules:
+    
+    # Alert: HPA at max replicas
+    - alert: HPAAtMaxReplicas
+      expr: |
+        (kube_hpa_status_current_replicas / kube_hpa_status_desired_replicas) == 1 
+        and kube_hpa_status_current_replicas > 0
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "HPA '{{ $labels.hpa }}' is at max replicas"
+        description: "Service {{ $labels.hpa }} has scaled to maximum replicas. Manual intervention may be needed."
+    
+    # Alert: HPA unable to scale
+    - alert: HPAUnableToScale
+      expr: |
+        (kube_hpa_status_desired_replicas / kube_hpa_status_current_replicas) > 1.1
+        or (kube_hpa_status_current_replicas / kube_hpa_status_desired_replicas) > 1.1
+      for: 10m
+      labels:
+        severity: critical
+      annotations:
+        summary: "HPA '{{ $labels.hpa }}' unable to meet desired replicas"
+        description: "HPA is unable to scale to desired replica count"
+    
+    # Alert: Scaling rate limit hit
+    - alert: HPAScalingRateLimit
+      expr: |
+        rate(kubernetes_build_info[5m]) > 0.1
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "HPA scaling rate may be limited"
+        description: "Pod creation rate is high, HPA may be hitting rate limits"
+
+---
+
+# Vertical Pod Autoscaler (VPA) for right-sizing (optional)
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: api-gateway-vpa
+  namespace: trading-platform
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api-gateway
+  updatePolicy:
+    updateMode: "Off"  # Set to "Auto" in production after testing
+  resourcePolicy:
+    containerPolicies:
+    - containerName: api-gateway
+      minAllowed:
+        cpu: 100m
+        memory: 128Mi
+      maxAllowed:
+        cpu: 2
+        memory: 1Gi
+      controlledResources:
+      - cpu
+      - memory
+
+---
+
+# PDB (Pod Disruption Budget) to prevent too many pod evictions during scaling
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: trading-platform-pdb
+  namespace: trading-platform
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      critical: "true"
