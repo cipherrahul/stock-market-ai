@@ -1,147 +1,78 @@
 @echo off
-REM 🚀 REALTIME SYSTEM QUICK START (Windows)
-REM This script starts all services needed for 100% realtime trading
+REM 🚀 MULTI-AGENT REALTIME SYSTEM QUICK START (Windows)
+REM Starts the unified trading and multi-agent intelligence stack
 
 setlocal enabledelayedexpansion
 
 echo.
-echo 🚀 Starting 100%% Realtime Trading System on Windows...
+echo ===================================================================
+echo 🦅 SOVEREIGN MULTI-AGENT TRADING SYSTEM (State-of-the-Art Architecture)
+echo ===================================================================
 echo.
 
-REM Check if Node.js is installed
 where node >nul 2>nul
 if errorlevel 1 (
     echo ❌ Node.js is not installed or not in PATH
-    echo    Install from: https://nodejs.org/
     exit /b 1
 )
 
-echo ✅ Node.js found: %NODE_VERSION%
-echo.
-
-REM Function to check if port is in use (requires netstat)
-setlocal enabledelayedexpansion
-
-REM Start Market Data Service (Real-time price stream)
-echo.
-echo [1/9] Starting Market Data Service (Port 3003)...
-echo.
-
-cd services\market-data-service
-call npm install --silent
-if exist src\index_realtime.ts (
-    start "Market Data Service" cmd /k "npm start"
-    echo ✅ Market Data Service started
-    timeout /t 3 /nobreak
-) else (
-    echo ❌ File src\index_realtime.ts not found
-    exit /b 1
-)
-
-cd ..\..\
-
-REM Start API Gateway with WebSocket support
-echo.
-echo [2/9] Starting API Gateway with WebSocket (Port 3000)...
-echo.
-
+REM 1. Start API Gateway (Port 3000 + WebSocket ws://localhost:3000/ws)
+echo [1/5] Starting API Gateway & WebSocket Router (Port 3000)...
 cd apps\gateway
-call npm install --silent
-if exist src\index_realtime.ts (
-    start "API Gateway (WebSocket)" cmd /k "npm start"
-    echo ✅ API Gateway started
-    timeout /t 2 /nobreak
+start "API Gateway & WebSockets" cmd /k "npm run dev"
+timeout /t 2 /nobreak
+cd ..\..\
+
+REM 2. Start Multi-Agent Python Engine (Port 3004)
+echo [2/5] Starting Multi-Agent AI Engine (Port 3004)...
+cd services\ai-engine-service
+if exist .venv\Scripts\python.exe (
+    start "Multi-Agent AI Engine" cmd /k ".venv\Scripts\python.exe -m uvicorn main:app --port 3004 --reload"
 ) else (
-    echo ❌ File src\index_realtime.ts not found
-    exit /b 1
+    start "Multi-Agent AI Engine" cmd /k "python -m uvicorn main:app --port 3004 --reload"
 )
-
-cd ..\..\
-
-REM Start Auth Service
-echo [3/9] Starting Auth Service (Port 3001)...
-cd services\auth-service
-call npm install --silent
-start "Auth Service" cmd /k "npm start"
 timeout /t 2 /nobreak
 cd ..\..\
 
-REM Start Portfolio Service
-echo [4/9] Starting Portfolio Service (Port 3005)...
-cd services\portfolio-service
-call npm install --silent
-start "Portfolio Service" cmd /k "npm start"
+REM 3. Start Market Data Service (Port 3003)
+echo [3/5] Starting Market Data Service (Port 3003)...
+cd services\market-data-service
+start "Market Data Service" cmd /k "npm start"
 timeout /t 2 /nobreak
 cd ..\..\
 
-REM Start Trading Engine
-echo [5/9] Starting Trading Engine (Port 3006)...
+REM 4. Start Trading Engine (Port 3006)
+echo [4/5] Starting Trading Engine (Port 3006)...
 cd services\trading-engine-service
-call npm install --silent
 start "Trading Engine" cmd /k "npm start"
 timeout /t 2 /nobreak
 cd ..\..\
 
-REM Start AI Engine
-echo [6/9] Starting AI Engine (Port 3004)...
-cd services\ai-engine-service
-call npm install --silent
-start "AI Engine" cmd /k "npm start"
-timeout /t 2 /nobreak
-cd ..\..\
-
-REM Start Risk Management
-echo [7/9] Starting Risk Management (Port 3010)...
-cd services\risk-management-service
-call npm install --silent
-start "Risk Management" cmd /k "npm start"
-timeout /t 2 /nobreak
-cd ..\..\
-
-REM Start Notification Service
-echo [8/9] Starting Notification Service (Port 3009)...
-cd services\notification-service
-call npm install --silent
-start "Notification Service" cmd /k "npm start"
+REM 5. Start Agent Orchestrator (Port 3012)
+echo [5/5] Starting Agent Orchestrator (Port 3012)...
+cd services\agent-orchestrator
+start "Agent Orchestrator" cmd /k "npm run dev"
 timeout /t 2 /nobreak
 cd ..\..\
 
 echo.
-echo [9/9] All services started!
+echo ===================================================================
+echo ✅ MULTI-AGENT TRADING ECOSYSTEM STARTED
+echo ===================================================================
 echo.
-
-echo ═══════════════════════════════════════════════════════════════
-echo ✅ 100%% REALTIME SYSTEM STARTED
-echo ═══════════════════════════════════════════════════════════════
-echo.
-
-echo 📊 Services Running:
+echo 📊 Active Endpoints:
 echo   🌐 API Gateway:          http://localhost:3000
-echo   📡 WebSocket:            ws://localhost:3000/ws
-echo   📍 Market Data:          http://localhost:3003
-echo   🔐 Auth Service:         http://localhost:3001
-echo   💼 Portfolio Service:    http://localhost:3005
+echo   📡 WebSocket Feed:       ws://localhost:3000/ws
+echo   🧠 Multi-Agent Engine:   http://localhost:3004
+echo   📡 Market Data:          http://localhost:3003
 echo   📈 Trading Engine:       http://localhost:3006
-echo   🤖 AI Engine:            http://localhost:3004
-echo   ⚠️  Risk Management:     http://localhost:3010
-echo   🔔 Notification Service: http://localhost:3009
+echo   🦅 Agent Orchestrator:   http://localhost:3012
 echo.
-
-echo 🚀 Quick Start:
-echo   1. Frontend: cd apps\web && npm start
-echo   2. Verify: powershell -Command "& { Invoke-WebRequest http://localhost:3000/health }"
-echo   3. Check WebSocket: Open browser and check console
+echo 🚀 Next.js Frontend Dashboard:
+echo   Run: cd apps\web ^&^& npm run dev
+echo   URL: http://localhost:3000 or http://localhost:5000
 echo.
-
-echo 📖 Documentation:
-echo   - Full Guide: type REALTIME_SYSTEM_GUIDE.md
-echo   - Audit Report: type PRODUCTION_READINESS_AUDIT.md
-echo   - Executive Brief: type EXECUTIVE_BRIEF.md
+echo 🛑 To stop all services: Press Ctrl+C in each window or run:
+echo    taskkill /F /IM node.exe /IM python.exe
 echo.
-
-echo 🛑 To stop all services: Press Ctrl+C in each window or use:
-echo    taskkill /F /IM node.exe
-echo.
-
-echo All service windows will remain open. You can close them individually when done.
 pause

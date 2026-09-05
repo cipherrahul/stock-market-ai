@@ -9,7 +9,8 @@ export class BrokerRegistry {
 
     constructor() {
         this.brokers.push(new ZerodhaAdapter());
-        this.brokers.push(new UpstoxAdapter());
+        // Temporarily disabled due to SDK initialization issue
+        // this.brokers.push(new UpstoxAdapter());
         this.brokers.push(new AlpacaAdapter(
             process.env.ALPACA_API_KEY || 'PK_DEBUG_KEY',
             process.env.ALPACA_API_SECRET || 'SK_DEBUG_SECRET'

@@ -19,7 +19,8 @@ const wss = new WebSocketServer({ server, path: '/ws' });
 // Kafka for receiving real-time updates
 const kafka = new Kafka({
   clientId: 'api-gateway-realtime',
-  brokers: [(process.env.KAFKA_BROKER || 'localhost:9092')],
+  brokers: ['localhost:9092'],
+
 });
 
 // Middleware
@@ -299,6 +300,28 @@ app.get('/api/v1/market/stocks', limiter(10), async (req: Request, res: Response
     });
   } catch (error: any) {
     res.status(error.response?.status || 500).json(error.response?.data || { error: 'Failed' });
+  }
+});
+
+app.get('/api/v1/market/history/:symbol', limiter(60), async (req: Request, res: Response) => {
+  try {
+    const queryStr = new URLSearchParams(req.query as any).toString();
+    const url = `${SERVICES.market}/api/v1/market/history/${req.params.symbol}${queryStr ? `?${queryStr}` : ''}`;
+    const response = await axios.get(url, { timeout: 6000 });
+    res.json(response.data);
+  } catch (error: any) {
+    res.status(error.response?.status || 500).json(error.response?.data || { error: 'Failed to fetch history' });
+  }
+});
+
+app.get('/api/v1/market/search', limiter(60), async (req: Request, res: Response) => {
+  try {
+    const queryStr = new URLSearchParams(req.query as any).toString();
+    const url = `${SERVICES.market}/api/v1/market/search${queryStr ? `?${queryStr}` : ''}`;
+    const response = await axios.get(url, { timeout: 6000 });
+    res.json(response.data);
+  } catch (error: any) {
+    res.status(error.response?.status || 500).json(error.response?.data || { error: 'Failed to search market' });
   }
 });
 

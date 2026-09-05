@@ -30,8 +30,5 @@
   "engines": {
     "node": ">=18.0.0"
   },
-  "dependencies": {
-    "plaid": "^41.4.0",
-    "stripe": "^20.4.1"
-  }
+  "dependencies": {}
 }

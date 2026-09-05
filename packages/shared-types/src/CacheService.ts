@@ -388,4 +388,3 @@ export function CacheInvalidate(pattern: string) {
 }
 
 export default CacheService;
-export { CacheService, CacheConfig, CacheStats, CacheAside, CacheInvalidate };

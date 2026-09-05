@@ -547,6 +547,97 @@ app.get('/api/v1/risk/metrics/:userId', async (req: Request, res: Response) => {
 });
 
 /**
+ * API: Pre-Trade Risk Circuit Breaker Check (Stage 3 Gatekeeper)
+ * Deterministically audits proposed order BEFORE execution
+ */
+app.post('/api/v1/risk/pretrade-check', async (req: Request, res: Response) => {
+  try {
+    const {
+      userId = '00000000-0000-0000-0000-000000000000',
+      symbol,
+      quantity = 10,
+      price = 100,
+      stopLoss,
+      atr,
+      accountBalance = 100_000,
+    } = req.body;
+
+    const settings = USER_SETTINGS_CACHE.get(userId) || {};
+    const maxDailyLoss = Number(settings.max_daily_loss || 5000);
+    const maxDrawdown = Number(settings.max_drawdown || 10);
+    const maxHeat = Number(settings.max_portfolio_heat || 80);
+    const riskPerTradePct = Number(settings.risk_per_trade_percent || 2.0);
+
+    let currentDailyLoss = 0;
+    let currentDrawdown = 0;
+    let portfolioHeat = 0;
+
+    try {
+      currentDailyLoss = await calculateDailyLoss(userId);
+      currentDrawdown = await calculateDrawdown(userId);
+      portfolioHeat = await calculatePortfolioHeat(userId);
+    } catch (e: any) {
+      console.warn(`[RiskPreTrade] Metrics calculation fallback: ${e.message}`);
+    }
+
+    // Calculate proposed trade risk
+    const sl = Number(stopLoss) || (Number(price) * 0.98);
+    const riskPerUnit = Math.max(0.01, Math.abs(Number(price) - sl));
+    const proposedRisk = riskPerUnit * Number(quantity);
+
+    // Check circuit breakers
+    const dailyLossOk = (currentDailyLoss + proposedRisk) <= maxDailyLoss;
+    const drawdownOk = currentDrawdown < maxDrawdown;
+    const heatOk = portfolioHeat < maxHeat;
+
+    // Volatility-adjusted position sizing based on ATR
+    let recommendedQuantity = Number(quantity);
+    if (atr && Number(atr) > 0) {
+      const maxTradeRiskCapital = accountBalance * (riskPerTradePct / 100);
+      const atrStopDistance = Math.max(riskPerUnit, Number(atr) * 1.5);
+      const calculatedQty = Math.max(1, Math.floor(maxTradeRiskCapital / atrStopDistance));
+      recommendedQuantity = Math.min(Number(quantity), calculatedQty);
+    }
+
+    const approved = dailyLossOk && drawdownOk && heatOk;
+    let reason = 'Pre-trade risk criteria satisfied';
+    if (!dailyLossOk) {
+      reason = `Projected daily loss (₹${(currentDailyLoss + proposedRisk).toFixed(2)}) exceeds max threshold (₹${maxDailyLoss})`;
+    } else if (!drawdownOk) {
+      reason = `Portfolio drawdown (${currentDrawdown.toFixed(1)}%) breaches circuit breaker limit (${maxDrawdown}%)`;
+    } else if (!heatOk) {
+      reason = `Portfolio heat (${portfolioHeat.toFixed(1)}%) breaches ceiling (${maxHeat}%)`;
+    }
+
+    res.json({
+      approved,
+      symbol,
+      requestedQuantity: Number(quantity),
+      recommendedQuantity,
+      proposedRisk: Math.round(proposedRisk * 100) / 100,
+      dailyLossOk,
+      drawdownOk,
+      heatOk,
+      limits: {
+        maxDailyLoss,
+        maxDrawdown,
+        maxHeat,
+      },
+      currentMetrics: {
+        dailyLoss: Math.round(currentDailyLoss * 100) / 100,
+        drawdownPercent: Math.round(currentDrawdown * 10) / 10,
+        portfolioHeatPercent: Math.round(portfolioHeat * 10) / 10,
+      },
+      reason,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err: any) {
+    console.error('Pre-trade risk check failed:', err);
+    res.status(500).json({ error: 'Pre-trade risk check failed', details: err.message });
+  }
+});
+
+/**
  * API: Get Position-Level Risk
  */
 app.get('/api/v1/risk/position/:positionId', async (req: Request, res: Response) => {

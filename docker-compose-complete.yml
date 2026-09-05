@@ -37,33 +37,6 @@ services:
     networks:
       - trading_network
 
-  # Kafka
-  zookeeper:
-    image: confluentinc/cp-zookeeper:7.5.0
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
-    ports:
-      - "2181:2181"
-    networks:
-      - trading_network
-
-  kafka:
-    image: confluentinc/cp-kafka:7.5.0
-    depends_on:
-      - zookeeper
-    ports:
-      - "9092:9092"
-    environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://kafka:9092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
-      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-    networks:
-      - trading_network
-
   # API Gateway
   api-gateway:
     build:
@@ -324,11 +297,8 @@ services:
       - "3009:3009"
     environment:
       PORT: 3009
-      KAFKA_BROKERS: kafka:29092
       REDIS_URL: redis://redis:6379
     depends_on:
-      kafka:
-        condition: service_started
       redis:
         condition: service_healthy
     healthcheck:
@@ -353,13 +323,13 @@ services:
       DB_USER: ${DB_USER:-trading_user}
       DB_PASSWORD: ${DB_PASSWORD:-SecurePass123}
       DB_NAME: ${DB_NAME:-trading_platform}
-      KAFKA_BROKER: kafka:29092
+      REDIS_URL: redis://redis:6379
       BROKER_SERVICE_URL: http://broker-integration-service:3007
     depends_on:
       postgres:
         condition: service_healthy
-      kafka:
-        condition: service_started
+      redis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3010/health"]
       interval: 10s
@@ -378,12 +348,9 @@ services:
     environment:
       PORT: 3011
       REDIS_URL: redis://redis:6379
-      KAFKA_BROKER: kafka:29092
     depends_on:
       redis:
-        condition: service_started
-      kafka:
-        condition: service_started
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3011/health"]
       interval: 10s

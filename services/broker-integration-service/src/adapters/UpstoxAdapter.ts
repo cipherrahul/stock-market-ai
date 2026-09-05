@@ -12,13 +12,13 @@ export class UpstoxAdapter extends BaseBroker {
 
     constructor() {
         super();
-        this.client = new UpstoxClient();
+        this.client = new (UpstoxClient as any).OrderApi();
         
         const encToken = process.env.UPSTOX_ACCESS_TOKEN_ENC || '';
         if (encToken) {
             try {
                 const accessToken = SecurityVault.decrypt(encToken);
-                this.client.setAccessToken(accessToken);
+                (UpstoxClient as any).ApiClient.instance.accessToken = accessToken;
             } catch (e) {
                 console.error('❌ [UpstoxAdapter] Failed to decrypt access token');
                 this.connected = false;
@@ -42,14 +42,15 @@ export class UpstoxAdapter extends BaseBroker {
                 transaction_type: order.side === 'BUY' ? "BUY" : "SELL"
             };
 
-            // const result = await this.client.placeOrder(orderData);
-            const orderId = `u_ord_${Math.random().toString(36).substr(2, 9)}`;
+            // 2026 AUDIT: MANDATORY LIVE EXECUTION using Upstox SDK
+            const result = await this.client.placeOrder(orderData);
+            const orderId = result.data.order_id;
 
             return {
                 status: 'EXECUTED',
                 broker: this.name,
                 orderId: orderId,
-                executedPrice: order.price || 2500.45,
+                executedPrice: order.price || 0,
                 timestamp: new Date().toISOString()
             };
         } catch (error: any) {

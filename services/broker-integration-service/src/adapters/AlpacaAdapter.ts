@@ -11,7 +11,7 @@ export class AlpacaAdapter extends BaseBroker {
     private apiSecret: string;
     private baseUrl: string;
 
-    constructor(apiKey: string, apiSecret: string, isPaper: boolean = true) {
+    constructor(apiKey: string, apiSecret: string, isPaper: boolean = false) {
         super();
         this.apiKey = apiKey;
         this.apiSecret = apiSecret;

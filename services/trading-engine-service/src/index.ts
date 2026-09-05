@@ -1,109 +1,42 @@
-import express from 'express';
-import { Kafka } from 'kafkajs';
-import { Pool } from 'pg';
-import axios from 'axios';
 import dotenv from 'dotenv';
+import { Pool } from 'pg';
+import { createTradingEngineApp } from './app';
+import { loadTradingConfig } from './config';
 
 dotenv.config();
 
-const app = express();
-app.use(express.json());
-
-const kafka = new Kafka({
-  clientId: 'trading-engine-service',
-  brokers: [(process.env.KAFKA_BROKER || 'localhost:9092')],
-});
-
+const config = loadTradingConfig();
 const pool = new Pool({
-  host: process.env.DB_HOST,
-  port: parseInt(process.env.DB_PORT || '5432'),
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
+  host: config.dbHost,
+  port: config.dbPort,
+  user: config.dbUser,
+  password: config.dbPassword,
+  database: config.dbName,
+  max: 20,
+  idleTimeoutMillis: 30_000,
+  connectionTimeoutMillis: 5_000,
+  application_name: config.serviceName,
 });
 
-// Execute trade
-app.post('/api/v1/trading/execute', async (req, res) => {
-  try {
-    const { userId, symbol, quantity, side, price } = req.body;
-
-    // Validation
-    if (!userId || !symbol || !quantity || !side || !price) {
-      return res.status(400).json({ error: 'Missing required trade parameters' });
-    }
-    if (quantity <= 0 || price <= 0) {
-      return res.status(400).json({ error: 'Quantity and price must be positive' });
-    }
-    if (!['BUY', 'SELL'].includes(side)) {
-      return res.status(400).json({ error: 'Invalid trade side' });
-    }
-
-    // Validate risk
-    const portfolioRes = await axios.get(
-      `${process.env.PORTFOLIO_SERVICE_URL}/api/v1/portfolio/${userId}`
-    );
-    const portfolio = portfolioRes.data;
-
-    if (side === 'BUY') {
-      const cost = price * quantity;
-      if (portfolio.balance < cost) {
-        return res.status(400).json({ error: 'Insufficient balance for trade' });
-      }
-    }
-
-    // Risk check
-    const riskAmount = price * quantity;
-    if (riskAmount > (Number(process.env.MAX_POSITION_SIZE) || 1000000)) {
-      return res.status(400).json({ error: 'Position size exceeds limit' });
-    }
-
-    // Send to broker
-    const brokerResponse = await axios.post(
-      `${process.env.BROKER_SERVICE_URL}/api/v1/broker/execute`,
-      { symbol, quantity, side, price }
-    );
-
-    // Store order
-    const result = await pool.query(
-      'INSERT INTO orders (user_id, symbol, quantity, side, price, status) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
-      [userId, symbol, quantity, side, price, 'executed']
-    );
-
-    res.json({
-      orderId: result.rows[0].id,
-      status: 'executed',
-      brokerOrderId: brokerResponse.data.orderId,
-    });
-  } catch (error) {
-    console.error('Trade execution error:', (error as any).message);
-    res.status(500).json({ error: 'Trade execution failed' });
-  }
+const app = createTradingEngineApp(config, { db: pool });
+const server = app.listen(config.port, () => {
+  console.log(`${config.serviceName} listening on port ${config.port}`);
 });
 
-// Check portfolio limits
-app.get('/api/v1/trading/limits/:userId', async (req, res) => {
-  try {
-    const { userId } = req.params;
+async function shutdown(signal: string) {
+  console.log(`${signal} received, shutting down ${config.serviceName}`);
+  server.close(async () => {
+    await pool.end();
+    process.exit(0);
+  });
+}
 
-    const result = await pool.query(
-      'SELECT SUM(quantity * price) as total_value FROM orders WHERE user_id = $1 AND status = $2',
-      [userId, 'executed']
-    );
-
-    res.json({
-      totalPositionValue: result.rows[0]?.total_value || 0,
-      maxPositionSize: process.env.MAX_POSITION_SIZE,
-      canTrade: (result.rows[0]?.total_value || 0) < process.env.MAX_POSITION_SIZE,
-    });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch limits' });
-  }
+process.on('SIGINT', () => {
+  void shutdown('SIGINT');
 });
 
-app.get('/health', (req, res) => {
-  res.json({ status: 'OK', service: 'trading-engine-service' });
+process.on('SIGTERM', () => {
+  void shutdown('SIGTERM');
 });
 
-app.listen(process.env.PORT || 3006, () => {
-  console.log(`Trading Engine Service on port ${process.env.PORT || 3006}`);
-});
+export default app;

@@ -1,150 +1,228 @@
+'use client';
+
 import React, { useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useAuth } from '@/hooks/useAuth';
+import { FiArrowRight, FiLock, FiMail, FiEye, FiEyeOff, FiTrendingUp, FiShield, FiZap, FiBarChart2 } from 'react-icons/fi';
 import toast from 'react-hot-toast';
-import { MotionDiv, MotionButton, MotionP } from '@/components/Motion';
-import { FiLock, FiMail, FiArrowRight } from 'react-icons/fi';
+import { useAuth } from '@/hooks/useAuth';
 
 export const LoginForm: React.FC = () => {
   const router = useRouter();
   const { login, loading, error } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
 
-  const handleEmailChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    // Remove leading/trailing whitespace and prevent invalid characters like trailing periods
-    let value = e.target.value.trim();
-    setEmail(value);
-  };
-
-  const handlePasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setPassword(e.target.value);
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
     try {
-      const response = await login(email, password);
-      toast.success('Login successful');
+      const response = await login(email.trim(), password);
       localStorage.setItem('userId', response.user.id);
+      toast.success('Signed in successfully');
       router.push('/dashboard');
-    } catch (err) {
-      toast.error(error || 'Login failed');
+    } catch {
+      toast.error(error || 'Login failed. Check your credentials.');
     }
   };
 
+  const features = [
+    { icon: FiTrendingUp, title: 'Real-time Trading', desc: 'Execute orders with live market data and smart routing.' },
+    { icon: FiShield,     title: 'Risk Management',  desc: 'Automated circuit breakers and portfolio protection.' },
+    { icon: FiZap,        title: 'AI Signals',        desc: 'LSTM-powered alpha signals with 75%+ confidence threshold.' },
+    { icon: FiBarChart2,  title: 'Analytics Suite',   desc: 'Comprehensive P&L tracking and portfolio analytics.' },
+  ];
+
+  const handleSkipLogin = () => {
+    const demoUser = {
+      id: 'demo_trader_001',
+      name: 'Alex Vance (Lead Quant)',
+      email: 'trader@sovereign.local',
+      role: 'HEAD_TRADER',
+    };
+    localStorage.setItem('token', 'demo_access_token_sovereign_ai');
+    localStorage.setItem('accessToken', 'demo_access_token_sovereign_ai');
+    localStorage.setItem('userId', demoUser.id);
+    localStorage.setItem('user', JSON.stringify(demoUser));
+    toast.success('Bypassing login — Demo Session Active');
+    router.push('/dashboard');
+  };
+
+  const handleFillDemoCredentials = () => {
+    setEmail('admin@sovereign.local');
+    setPassword('SovereignAI2026!');
+    toast('Demo credentials populated', { icon: '🔑' });
+  };
+
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100 relative overflow-hidden font-sans">
-      {/* Subtle background pattern */}
-      <div className="absolute top-0 right-0 w-96 h-96 bg-blue-50 rounded-full blur-3xl opacity-30" />
-      <div className="absolute bottom-0 left-0 w-96 h-96 bg-indigo-50 rounded-full blur-3xl opacity-30" />
-
-      <MotionDiv 
-        initial={{ opacity: 0, scale: 0.95, y: 10 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        className="w-full max-w-md relative z-10 px-6"
-      >
-        <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-8">
-          {/* Header Section */}
-          <div className="text-center mb-8">
-            <h1 className="text-3xl font-bold text-slate-900 mb-2">
-              Welcome Back
+    <div className="flex min-h-screen items-center justify-center px-4 py-10 bg-[var(--bg)]">
+      <div className="grid w-full max-w-6xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[var(--shadow-xl)] lg:grid-cols-[1.2fr_0.8fr]">
+        
+        {/* Left panel */}
+        <section className="hidden border-r border-slate-100 bg-gradient-to-br from-[#1e40af] via-[#1d4ed8] to-[#2563eb] p-12 lg:flex lg:flex-col">
+          <div className="mb-10">
+            <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-blue-200">Sovereign AI Platform</p>
+            <h1 className="mt-3 text-4xl font-bold tracking-tight text-white leading-tight">
+              Enterprise trading intelligence, unified.
             </h1>
-            <p className="text-slate-600 text-sm">Sign in to your account to continue</p>
-          </div>
-
-          {/* Form Section */}
-          <form onSubmit={handleSubmit} className="space-y-5">
-            <div className="space-y-2">
-              <label className="block text-sm font-semibold text-slate-700">Email Address</label>
-              <div className="relative group">
-                <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none text-slate-400 group-focus-within:text-slate-600 transition-colors">
-                  <FiMail className="text-base" />
-                </div>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={handleEmailChange}
-                  className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-300 rounded-lg text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-indigo-500 focus:bg-white focus:ring-1 focus:ring-indigo-200 transition-all font-medium"
-                  placeholder="you@example.com"
-                  required
-                />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <label className="block text-sm font-semibold text-slate-700">Password</label>
-                <a href="#" className="text-xs text-indigo-600 hover:text-indigo-700 font-medium">
-                  Forgot password?
-                </a>
-              </div>
-              <div className="relative group">
-                <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none text-slate-400 group-focus-within:text-slate-600 transition-colors">
-                  <FiLock className="text-base" />
-                </div>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={handlePasswordChange}
-                  className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-300 rounded-lg text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-indigo-500 focus:bg-white focus:ring-1 focus:ring-indigo-200 transition-all font-medium"
-                  placeholder="••••••••"
-                  required
-                />
-              </div>
-            </div>
-
-            {error && (
-              <MotionP 
-                initial={{ opacity: 0, x: -10 }}
-                animate={{ opacity: 1, x: 0 }}
-                className="text-red-600 text-sm font-medium bg-red-50 p-3 rounded-lg border border-red-200"
-              >
-                {error}
-              </MotionP>
-            )}
-
-            <MotionButton
-              type="submit"
-              disabled={loading}
-              whileHover={{ scale: 1.01 }}
-              whileTap={{ scale: 0.99 }}
-              className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {loading ? (
-                'Signing in...'
-              ) : (
-                <>
-                  Sign in <FiArrowRight className="text-base" />
-                </>
-              )}
-            </MotionButton>
-          </form>
-
-          {/* Divider */}
-          <div className="my-6 flex items-center">
-            <div className="flex-1 border-t border-slate-300" />
-            <span className="px-3 text-sm text-slate-500">or</span>
-            <div className="flex-1 border-t border-slate-300" />
-          </div>
-
-          {/* Footer Section */}
-          <div className="text-center">
-            <p className="text-slate-600 text-sm">
-              Don't have an account?{' '}
-              <a href="/register" className="text-indigo-600 hover:text-indigo-700 font-semibold transition-colors">
-                Sign up
-              </a>
+            <p className="mt-4 text-base leading-7 text-blue-100/80 max-w-lg">
+              Institutional-grade algorithmic trading, AI-powered signals, and autonomous portfolio management 
+              from a single clean workspace.
             </p>
           </div>
-        </div>
-        
-        {/* Footer text */}
-        <p className="mt-6 text-center text-xs text-slate-500">
-          Protected by enterprise-grade security
-        </p>
-        </MotionDiv>
+
+          <div className="grid gap-4 mt-4">
+            {features.map(({ icon: Icon, title, desc }) => (
+              <div key={title} className="flex gap-4 rounded-xl bg-white/8 border border-white/10 p-4 backdrop-blur-sm">
+                <div className="shrink-0 rounded-lg bg-white/15 p-2 h-9 w-9 flex items-center justify-center">
+                  <Icon className="text-white" size={16} />
+                </div>
+                <div>
+                  <h2 className="text-sm font-semibold text-white">{title}</h2>
+                  <p className="mt-0.5 text-xs leading-5 text-blue-100/70">{desc}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Quick test bypass in left panel too */}
+          <div className="mt-auto pt-8 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="live-dot" />
+              <span className="text-xs text-blue-200 font-medium">Test Mode Available · v2.0.4</span>
+            </div>
+            <button
+              type="button"
+              onClick={handleSkipLogin}
+              className="text-xs text-blue-100 bg-white/10 hover:bg-white/20 border border-white/20 px-3 py-1.5 rounded-lg transition font-medium"
+            >
+              Skip to Dashboard →
+            </button>
+          </div>
+        </section>
+
+        {/* Right panel — login form */}
+        <section className="p-8 sm:p-10 lg:p-12 flex flex-col justify-center">
+          <div className="mx-auto w-full max-w-md">
+            <div className="flex items-center justify-between">
+              <p className="eyebrow">Sign In</p>
+              <span className="text-[11px] font-semibold bg-blue-50 text-blue-700 px-2.5 py-1 rounded-full border border-blue-200">
+                Testing Mode Active
+              </span>
+            </div>
+            <h2 className="mt-2 text-2xl font-bold tracking-tight text-slate-900">Welcome back</h2>
+            <p className="mt-2 text-sm text-slate-500">
+              Enter your workspace credentials or use instant demo access below.
+            </p>
+
+            {/* Quick Testing Access Banner */}
+            <div className="mt-5 p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 flex flex-col gap-2.5">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-semibold text-slate-700 flex items-center gap-1.5">
+                  ⚡ Testing Shortcut
+                </span>
+                <button
+                  type="button"
+                  onClick={handleFillDemoCredentials}
+                  className="text-blue-600 hover:text-blue-700 font-medium underline text-[11px]"
+                >
+                  Fill demo credentials
+                </button>
+              </div>
+              <button
+                type="button"
+                id="skip-login-btn"
+                onClick={handleSkipLogin}
+                className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg shadow-sm transition"
+              >
+                <span>🚀 Skip Login — Access Dashboard Directly</span>
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmit} className="mt-6 space-y-4" noValidate>
+              <div>
+                <label htmlFor="email" className="block text-sm font-medium text-slate-700 mb-1.5">Email</label>
+                <div className="relative">
+                  <FiMail className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={15} />
+                  <input
+                    id="email"
+                    type="email"
+                    value={email}
+                    onChange={e => setEmail(e.target.value)}
+                    placeholder="name@company.com"
+                    className="input-field pl-10"
+                    required
+                    autoFocus
+                    autoComplete="email"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label htmlFor="password" className="block text-sm font-medium text-slate-700 mb-1.5">Password</label>
+                <div className="relative">
+                  <FiLock className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={15} />
+                  <input
+                    id="password"
+                    type={showPassword ? 'text' : 'password'}
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    placeholder="Enter your password"
+                    className="input-field pl-10 pr-10"
+                    required
+                    autoComplete="current-password"
+                  />
+                  <button
+                    type="button"
+                    tabIndex={-1}
+                    onClick={() => setShowPassword(s => !s)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showPassword ? <FiEyeOff size={15} /> : <FiEye size={15} />}
+                  </button>
+                </div>
+              </div>
+
+              {error ? (
+                <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  {error}
+                </div>
+              ) : null}
+
+              <button
+                type="submit"
+                id="login-submit-btn"
+                disabled={loading}
+                className="primary-button w-full mt-2"
+                style={{ height: '44px' }}
+              >
+                {loading ? (
+                  <span className="flex items-center gap-2">
+                    <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    Signing in...
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-2">
+                    Sign in
+                    <FiArrowRight size={15} />
+                  </span>
+                )}
+              </button>
+            </form>
+
+            <div className="mt-8 flex items-center justify-between border-t border-slate-100 pt-6 text-sm">
+              <span className="text-slate-500">Need an account?</span>
+              <Link href="/register" className="font-semibold text-blue-600 hover:text-blue-700 transition-colors">
+                Create workspace access
+              </Link>
+            </div>
+          </div>
+        </section>
+      </div>
     </div>
   );
 };

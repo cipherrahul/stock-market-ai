@@ -4,6 +4,8 @@ import axios from 'axios';
 import dotenv from 'dotenv';
 import { Kafka, Producer } from 'kafkajs';
 
+import crypto from 'crypto';
+
 dotenv.config();
 
 const app: Express = express();
@@ -87,51 +89,38 @@ async function executeTradeRealtime(
   stopLoss?: number,
   takeProfit?: number,
   memo?: string,
-  isPaper?: boolean
+  isPaper?: boolean,
+  orderVariant: 'CNC' | 'MIS' = 'CNC'
 ): Promise<any> {
   const client = await pool.connect();
-  const orderId = `ORD-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-  const transactionId = `TXN-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  const orderId = `ORD-${Date.now()}-${crypto.randomUUID().substring(0, 8)}`;
+  const transactionId = `TXN-${Date.now()}-${crypto.randomUUID().substring(0, 8)}`;
+  const isIntraday = orderVariant === 'MIS';
 
   try {
-    // BEGIN TRANSACTION
     await client.query('BEGIN');
 
-    // Step 1: Fetch market data (volatility, volume)
     const marketDataResult = await client.query(
-      `SELECT 
-        AVG(volume) as avg_volume,
-        STDDEV(price) / AVG(price) as volatility,
-        MAX(price) as high_price,
-        MIN(price) as low_price
-       FROM market_history 
-       WHERE symbol = $1 
-       AND timestamp > NOW() - INTERVAL '30 days'`,
+      `SELECT AVG(volume) as avg_volume, STDDEV(price) / AVG(price) as volatility,
+              MAX(price) as high_price, MIN(price) as low_price
+       FROM market_history WHERE symbol = $1 AND timestamp > NOW() - INTERVAL '30 days'`,
       [symbol]
     );
 
     const volatility = marketDataResult.rows[0]?.volatility || 0.02;
     const avgVolume = marketDataResult.rows[0]?.avg_volume || 1000000;
 
-    // Step 2: Calculate slippage
     const executedPrice = SlippageCalculator.calculateSlippage({
-      symbol,
-      quantity,
-      requestedPrice,
-      volatility,
-      avgVolume,
-      side,
+      symbol, quantity, requestedPrice, volatility, avgVolume, side,
     });
 
     const slippage = Math.abs(executedPrice - requestedPrice);
-    const slippagePercent = (slippage / requestedPrice) * 100;
+    const slippagePercent = (slippage / Math.max(requestedPrice, 0.01)) * 100;
+    console.log(`📊 Slippage: ${slippagePercent.toFixed(4)}% | Variant: ${orderVariant}`);
 
-    console.log(`📊 Slippage: ${slippagePercent.toFixed(4)}%`);
-
-    // Step 3: Validate risk limits (Dynamic)
     const userResult = await client.query('SELECT preferences FROM users WHERE id = $1', [userId]);
     const riskSettings = userResult.rows[0]?.preferences?.risk_settings || {};
-    const maxPositionSize = riskSettings.max_position_size || 1000000; // Fallback to 1M
+    const maxPositionSize = riskSettings.max_position_size || 1000000;
 
     const portfolio = await client.query(
       `SELECT SUM(CASE WHEN side = 'BUY' THEN quantity ELSE -quantity END) as total_qty
@@ -144,40 +133,43 @@ async function executeTradeRealtime(
 
     if (positionValue > maxPositionSize) {
       await client.query('ROLLBACK');
-      throw new Error(`Position size (₹${positionValue.toFixed(2)}) exceeds your maximum limit (₹${maxPositionSize.toLocaleString()})`);
+      const err: any = new Error(`Position size (₹${positionValue.toFixed(2)}) exceeds your maximum limit (₹${maxPositionSize.toLocaleString()})`);
+      err.errorCode = 'RISK_LIMIT_EXCEEDED';
+      err.status = 400;
+      throw err;
     }
 
+    // Broker execution with exponential backoff (3 attempts)
     let brokerOrderId: string | undefined;
-    // Step 4: Execute High-Fidelity SMART ORDER ROUTING via Broker Service
-    try {
-      const brokerRes = await axios.post(`${process.env.BROKER_SERVICE_URL}/api/v1/broker/execute`, {
-        symbol: symbol, // Use the symbol from the trade request
-        side: side,     // Use the side from the trade request
-        quantity: quantity,
-        price: executedPrice, // Use the calculated executedPrice
-        userId: userId, // Use the actual userId
-        isAgentic: true,
-        memo: memo,
-        isPaper: isPaper,
-      });
-
-      brokerOrderId = brokerRes.data.orderId;
-      console.log(`✅ [TradingEngine] Order executed via SOR. Broker ID: ${brokerOrderId}`);
-    } catch (error: any) {
-      console.error(`❌ [TradingEngine] Execution Cluster FAILED: ${error.message}`);
-      // Institutional Failover: The Broker Service handles its own round-robin,
-      // so if this fails, we log the critical systemic risk breach.
-      // For now, we'll proceed without a brokerOrderId if the call fails.
-      brokerOrderId = 'FAILED-BROKER-CALL-' + orderId;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const brokerRes = await axios.post(`${process.env.BROKER_SERVICE_URL}/api/v1/broker/execute`, {
+          symbol, side, quantity, price: executedPrice, userId,
+          isAgentic: true, memo, isPaper, orderVariant,
+        });
+        brokerOrderId = brokerRes.data.orderId;
+        console.log(`✅ [TradingEngine] Broker executed. ID: ${brokerOrderId} (attempt ${attempt})`);
+        break;
+      } catch (err: any) {
+        console.error(`⚠️ [TradingEngine] Broker attempt ${attempt} failed: ${err.message}`);
+        if (attempt < 3) {
+          await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 200));
+        } else {
+          brokerOrderId = `BROKER-FALLBACK-${orderId}`;
+        }
+      }
     }
 
-    // Step 5: Create order record (with Broker ID)
     const orderResult = await client.query(
-      `INSERT INTO orders 
-       (user_id, symbol, quantity, price, requested_price, side, status, slippage, transaction_id, broker_order_id, stop_loss_price, take_profit_price, memo, is_paper, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
+      `INSERT INTO orders
+       (user_id, symbol, quantity, price, requested_price, side, status, slippage,
+        transaction_id, broker_order_id, stop_loss_price, take_profit_price,
+        memo, is_paper, order_variant, is_intraday, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,NOW())
        RETURNING id, created_at`,
-      [userId, symbol, quantity, executedPrice, requestedPrice, side, 'EXECUTED', slippage, transactionId, brokerOrderId, stopLoss, takeProfit, memo, isPaper]
+      [userId, symbol, quantity, executedPrice, requestedPrice, side, 'EXECUTED',
+       slippage, transactionId, brokerOrderId, stopLoss, takeProfit,
+       memo, isPaper, orderVariant, isIntraday]
     );
 
     const createdOrder = orderResult.rows[0];
@@ -311,41 +303,131 @@ async function executeTradeRealtime(
 // Execute trade (BUY or SELL)
 app.post('/api/v1/trading/execute', async (req: Request, res: Response) => {
   try {
-    const { userId, symbol, quantity, side, price, stopLoss, takeProfit, memo, isPaper } = req.body;
+    const { userId, symbol, quantity, side, price, stopLoss, takeProfit, memo, isPaper, orderVariant } = req.body;
 
-    // Validate input
     if (!userId || !symbol || !quantity || !side) {
-      return res.status(400).json({ error: 'Missing required fields' });
+      return res.status(400).json({ error: 'Missing required fields', errorCode: 'VALIDATION_ERROR' });
     }
-
     if (!['BUY', 'SELL'].includes(side)) {
-      return res.status(400).json({ error: 'Invalid side (must be BUY or SELL)' });
+      return res.status(400).json({ error: 'Invalid side (must be BUY or SELL)', errorCode: 'VALIDATION_ERROR' });
     }
-
     if (quantity <= 0 || quantity > 100000) {
-      return res.status(400).json({ error: 'Quantity must be between 1 and 100000' });
+      return res.status(400).json({ error: 'Quantity must be between 1 and 100000', errorCode: 'VALIDATION_ERROR' });
     }
 
-    // Execute trade
+    const variant: 'CNC' | 'MIS' = orderVariant === 'MIS' ? 'MIS' : 'CNC';
+    const isIntraday = variant === 'MIS';
+
     const result = await executeTradeRealtime(
-      userId,
-      symbol.toUpperCase(),
-      quantity,
-      price || 0, // Will use market price if 0
-      side as 'BUY' | 'SELL',
-      stopLoss,
-      takeProfit,
-      memo,
-      isPaper
+      userId, symbol.toUpperCase(), quantity,
+      price || 0, side as 'BUY' | 'SELL',
+      stopLoss, takeProfit, memo, isPaper, variant
     );
 
-    res.status(201).json(result);
+    res.status(201).json({ ...result, orderVariant: variant, isIntraday });
   } catch (error: any) {
     console.error('Error:', error);
-    res.status(500).json({
+    const errorCode = error.errorCode || 'TRADE_EXECUTION_FAILED';
+    res.status(error.status || 500).json({
       error: error.message || 'Trade execution failed',
+      errorCode,
       status: 'FAILED',
     });
+  }
+});
+
+// ─── Intraday Square-Off (MIS Auto-Liquidation) ────────────────────────────
+app.post('/api/v1/trading/intraday/square-off/:userId', async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.params;
+    console.log(`⚡ [Intraday] Square-off initiated for user: ${userId}`);
+
+    // Get all open intraday (MIS) BUY positions for today
+    const openPositions = await pool.query(
+      `SELECT symbol, SUM(CASE WHEN side = 'BUY' THEN quantity ELSE -quantity END) as net_qty,
+              AVG(price) as avg_price
+       FROM orders
+       WHERE user_id = $1 AND status = 'EXECUTED'
+         AND (order_variant = 'MIS' OR is_intraday = true)
+         AND created_at::date = CURRENT_DATE
+       GROUP BY symbol
+       HAVING SUM(CASE WHEN side = 'BUY' THEN quantity ELSE -quantity END) <> 0`,
+      [userId]
+    );
+
+    if (openPositions.rows.length === 0) {
+      return res.json({ message: 'No open intraday positions to square off', squaredOff: 0 });
+    }
+
+    let squaredOff = 0;
+    const results: any[] = [];
+
+    for (const pos of openPositions.rows) {
+      const netQty = Math.abs(Number(pos.net_qty));
+      const closeSide = Number(pos.net_qty) > 0 ? 'SELL' : 'BUY';
+      if (netQty <= 0) continue;
+
+      try {
+        const result = await executeTradeRealtime(
+          userId, pos.symbol, netQty, 0,
+          closeSide, undefined, undefined,
+          'INTRADAY_SQUARE_OFF', false, 'MIS'
+        );
+        squaredOff++;
+        results.push(result);
+      } catch (err: any) {
+        console.error(`❌ [SquareOff] Failed for ${pos.symbol}:`, err.message);
+        results.push({ symbol: pos.symbol, status: 'FAILED', error: err.message });
+      }
+    }
+
+    res.json({
+      message: `Intraday square-off complete: ${squaredOff}/${openPositions.rows.length} positions closed`,
+      squaredOff,
+      results,
+    });
+  } catch (error: any) {
+    console.error('❌ [SquareOff] Fatal error:', error);
+    res.status(500).json({ error: 'Square-off failed', errorCode: 'SQUARE_OFF_FAILED' });
+  }
+});
+
+// ─── Intraday Positions with Live P&L ─────────────────────────────────────
+app.get('/api/v1/trading/intraday/positions/:userId', async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.params;
+
+    const result = await pool.query(
+      `SELECT
+         symbol,
+         SUM(CASE WHEN side = 'BUY' THEN quantity ELSE -quantity END) as net_qty,
+         SUM(CASE WHEN side = 'BUY' THEN quantity * price ELSE 0 END) /
+           NULLIF(SUM(CASE WHEN side = 'BUY' THEN quantity ELSE 0 END), 0) as avg_buy_price,
+         MAX(created_at) as last_activity,
+         SUM(CASE WHEN side = 'BUY' THEN quantity ELSE 0 END) as total_buy_qty,
+         SUM(CASE WHEN side = 'SELL' THEN quantity ELSE 0 END) as total_sell_qty
+       FROM orders
+       WHERE user_id = $1 AND status = 'EXECUTED'
+         AND (order_variant = 'MIS' OR is_intraday = true)
+         AND created_at::date = CURRENT_DATE
+       GROUP BY symbol
+       HAVING SUM(CASE WHEN side = 'BUY' THEN quantity ELSE -quantity END) <> 0
+       ORDER BY last_activity DESC`,
+      [userId]
+    );
+
+    const positions = result.rows.map(row => ({
+      symbol: row.symbol,
+      netQty: Number(row.net_qty),
+      avgBuyPrice: Number(row.avg_buy_price) || 0,
+      side: Number(row.net_qty) > 0 ? 'BUY' : 'SELL',
+      lastActivity: row.last_activity,
+      isIntraday: true,
+    }));
+
+    res.json({ positions, total: positions.length });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch intraday positions' });
   }
 });
 

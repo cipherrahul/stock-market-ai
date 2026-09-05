@@ -34,35 +34,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # Message Queue
-  kafka:
-    image: confluentinc/cp-kafka:7.5.0
-    environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-    ports:
-      - "9092:9092"
-    networks:
-      - trading_network
-    depends_on:
-      - zookeeper
-    healthcheck:
-      test: ["CMD", "kafka-broker-api-versions.sh", "--bootstrap-servers", "localhost:9092"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  zookeeper:
-    image: confluentinc/cp-zookeeper:7.5.0
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-    ports:
-      - "2181:2181"
-    networks:
-      - trading_network
-
   # API Gateway (Nginx)
   api-gateway:
     image: nginx:alpine
@@ -92,7 +63,9 @@ services:
     environment:
       NODE_ENV: ${NODE_ENV}
       JWT_SECRET: ${JWT_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
       JWT_EXPIRY: ${JWT_EXPIRY}
+      CORS_ORIGIN: ${CORS_ORIGIN}
       DB_HOST: postgres
       DB_PORT: 5432
       DB_USER: ${DB_USER}
@@ -124,6 +97,7 @@ services:
       DB_NAME: ${DB_NAME}
       REDIS_URL: redis://redis:6379
       AUTH_SERVICE_URL: http://auth-service:3001
+      CORS_ORIGIN: ${CORS_ORIGIN}
       PORT: 3002
     ports:
       - "3002:3002"
@@ -149,6 +123,7 @@ services:
       DB_NAME: ${DB_NAME}
       REDIS_URL: redis://redis:6379
       KAFKA_BROKER: kafka:9092
+      CORS_ORIGIN: ${CORS_ORIGIN}
       PORT: 3003
     ports:
       - "3003:3003"
@@ -158,7 +133,7 @@ services:
       redis:
         condition: service_healthy
       kafka:
-        condition: service_healthy
+        condition: service_started
     networks:
       - trading_network
     restart: unless-stopped
@@ -176,6 +151,7 @@ services:
       DB_NAME: ${DB_NAME}
       REDIS_URL: redis://redis:6379
       KAFKA_BROKER: kafka:9092
+      CORS_ORIGIN: ${CORS_ORIGIN}
       PORT: 3004
     ports:
       - "3004:3004"
@@ -183,7 +159,7 @@ services:
       postgres:
         condition: service_healthy
       kafka:
-        condition: service_healthy
+        condition: service_started
     networks:
       - trading_network
     restart: unless-stopped
@@ -203,6 +179,7 @@ services:
       KAFKA_BROKER: kafka:9092
       BROKER_SERVICE_URL: http://broker-integration-service:3007
       PORTFOLIO_SERVICE_URL: http://portfolio-service:3005
+      CORS_ORIGIN: ${CORS_ORIGIN}
       PORT: 3006
     ports:
       - "3006:3006"
@@ -210,7 +187,7 @@ services:
       postgres:
         condition: service_healthy
       kafka:
-        condition: service_healthy
+        condition: service_started
     networks:
       - trading_network
     restart: unless-stopped
@@ -228,6 +205,7 @@ services:
       DB_NAME: ${DB_NAME}
       REDIS_URL: redis://redis:6379
       KAFKA_BROKER: kafka:9092
+      CORS_ORIGIN: ${CORS_ORIGIN}
       PORT: 3005
     ports:
       - "3005:3005"
@@ -235,7 +213,7 @@ services:
       postgres:
         condition: service_healthy
       kafka:
-        condition: service_healthy
+        condition: service_started
     networks:
       - trading_network
     restart: unless-stopped
@@ -253,6 +231,7 @@ services:
       REDIS_URL: redis://redis:6379
       ZERODHA_API_KEY: ${ZERODHA_API_KEY}
       ZERODHA_ACCESS_TOKEN: ${ZERODHA_ACCESS_TOKEN}
+      CORS_ORIGIN: ${CORS_ORIGIN}
       PORT: 3007
     ports:
       - "3007:3007"
@@ -274,6 +253,7 @@ services:
       DB_PASSWORD: ${DB_PASSWORD}
       DB_NAME: ${DB_NAME}
       REDIS_URL: redis://redis:6379
+      CORS_ORIGIN: ${CORS_ORIGIN}
       PORT: 3008
     ports:
       - "3008:3008"
@@ -296,6 +276,7 @@ services:
       DB_NAME: ${DB_NAME}
       REDIS_URL: redis://redis:6379
       KAFKA_BROKER: kafka:9092
+      CORS_ORIGIN: ${CORS_ORIGIN}
       PORT: 3009
     ports:
       - "3009:3009"

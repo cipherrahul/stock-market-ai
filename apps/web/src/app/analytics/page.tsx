@@ -1,199 +1,268 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { useApi } from '@/hooks/useApi';
+import {
+  AreaChart, Area, BarChart, Bar, CartesianGrid,
+  ResponsiveContainer, Tooltip, XAxis, YAxis, Cell,
+} from 'recharts';
 import { Layout } from '@/components/Layout';
-import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
-import toast from 'react-hot-toast';
-import { MotionDiv } from '@/components/Motion';
-import { FiBarChart2, FiActivity, FiArrowUpRight, FiArrowDownRight } from 'react-icons/fi';
+import { EmptyState, MetricCard, PageIntro, SectionCard } from '@/components/EnterpriseUI';
+import { useApi } from '@/hooks/useApi';
+import { FiTrendingUp, FiAward, FiBarChart2, FiTarget } from 'react-icons/fi';
 
-interface AnalyticsData {
-  date: string;
-  portfolio_value: number;
-  pnl: number;
-  trades: number;
+interface AnalyticsData { date: string; portfolio_value: number; pnl: number; trades: number; }
+interface PnL { totalPnl?: number; realizedPnl?: number; unrealizedPnl?: number; returnPercentage?: number; }
+interface Order { symbol: string; side: string; quantity: number; price: number; status: string; createdAt: string; }
+
+function calcMetrics(orders: Order[]) {
+  const executed = orders.filter(o => o.status === 'EXECUTED');
+  const buys = executed.filter(o => o.side === 'BUY');
+  const sells = executed.filter(o => o.side === 'SELL');
+
+  // Match buys to sells per symbol for win-rate
+  const symbolMap: Record<string, { avgCost: number; qty: number }> = {};
+  let wins = 0, losses = 0;
+  buys.forEach(o => {
+    if (!symbolMap[o.symbol]) symbolMap[o.symbol] = { avgCost: 0, qty: 0 };
+    const s = symbolMap[o.symbol];
+    s.avgCost = (s.avgCost * s.qty + o.price * o.quantity) / (s.qty + o.quantity);
+    s.qty += o.quantity;
+  });
+  sells.forEach(o => {
+    const s = symbolMap[o.symbol];
+    if (s && s.avgCost > 0) {
+      if (o.price > s.avgCost) wins++; else losses++;
+    }
+  });
+
+  const totalTrades = wins + losses;
+  const winRate = totalTrades > 0 ? (wins / totalTrades) * 100 : 0;
+
+  // Avg win/loss for profit factor
+  const avgWin = wins > 0 ? sells.filter(o => symbolMap[o.symbol] && o.price > symbolMap[o.symbol].avgCost).reduce((s, o) => s + o.price * o.quantity, 0) / Math.max(wins, 1) : 0;
+  const avgLoss = losses > 0 ? sells.filter(o => symbolMap[o.symbol] && o.price <= symbolMap[o.symbol].avgCost).reduce((s, o) => s + o.price * o.quantity, 0) / Math.max(losses, 1) : 0;
+  const profitFactor = avgLoss > 0 ? avgWin / avgLoss : wins > 0 ? Infinity : 0;
+
+  // P&L by symbol
+  const pnlBySymbol: Record<string, number> = {};
+  sells.forEach(o => {
+    const s = symbolMap[o.symbol];
+    if (!s) return;
+    const profit = (o.price - s.avgCost) * o.quantity;
+    pnlBySymbol[o.symbol] = (pnlBySymbol[o.symbol] || 0) + profit;
+  });
+
+  return { winRate, profitFactor, wins, losses, totalTrades, pnlBySymbol };
 }
+
+const CustomTooltip = ({ active, payload, label }: any) => {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white/95 backdrop-blur-sm px-4 py-3 shadow-xl text-xs space-y-1">
+      <p className="font-bold text-slate-700">{label}</p>
+      {payload.map((p: any) => (
+        <p key={p.dataKey} style={{ color: p.color }} className="tabular-nums">
+          {p.name}: ₹{Number(p.value).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+        </p>
+      ))}
+    </div>
+  );
+};
 
 export default function AnalyticsPage() {
   const router = useRouter();
-  const { get, loading } = useApi();
+  const { get } = useApi();
   const [analytics, setAnalytics] = useState<AnalyticsData[]>([]);
-  const [stats, setStats] = useState<any>(null);
-  const userId = typeof localStorage !== 'undefined' ? localStorage.getItem('userId') : null;
+  const [stats, setStats] = useState<PnL | null>(null);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      router.push('/login');
-    }
-  }, [router]);
+  const token  = typeof localStorage !== 'undefined' ? localStorage.getItem('token') || '' : '';
+  const userId = typeof localStorage !== 'undefined' ? localStorage.getItem('userId') || '' : '';
+
+  useEffect(() => { if (!token) router.push('/login'); }, [router, token]);
 
   useEffect(() => {
     if (!userId) return;
+    setLoading(true);
+    Promise.all([
+      get(`/api/v1/portfolio/${userId}/history`),
+      get(`/api/v1/portfolio/${userId}/pnl`),
+      get(`/api/v1/trading/history/${userId}`),
+    ]).then(([history, pnl, orderData]) => {
+      setAnalytics(history || []);
+      setStats(pnl || null);
+      setOrders(orderData || []);
+    }).finally(() => setLoading(false));
+  }, [get, userId]);
 
-    const loadAnalytics = async () => {
-      try {
-        const data = await get(`/api/v1/portfolio/${userId}/history`);
-        const pnlData = await get(`/api/v1/portfolio/${userId}/pnl`);
-        
-        setAnalytics(data || []);
-        setStats(pnlData);
-      } catch (error) {
-        toast.error('Sector Intelligence Failure: Failed to load analytics');
-      }
-    };
+  const { winRate, profitFactor, wins, losses, totalTrades, pnlBySymbol } = useMemo(() => calcMetrics(orders), [orders]);
 
-    loadAnalytics();
-    const interval = setInterval(loadAnalytics, 30000);
-    return () => clearInterval(interval);
-  }, [userId, get]);
+  const pnlBySymbolData = Object.entries(pnlBySymbol)
+    .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
+    .slice(0, 10)
+    .map(([symbol, pnl]) => ({ symbol, pnl }));
 
-  const pnlIsPositive = (stats?.totalPnl || 0) >= 0;
+  // Sharpe ratio approximation from portfolio history
+  const sharpeRatio = useMemo(() => {
+    if (analytics.length < 5) return 0;
+    const returns = analytics.slice(1).map((d, i) => {
+      const prev = analytics[i].portfolio_value;
+      return prev > 0 ? (d.portfolio_value - prev) / prev : 0;
+    });
+    const mean = returns.reduce((s, r) => s + r, 0) / returns.length;
+    const std = Math.sqrt(returns.reduce((s, r) => s + Math.pow(r - mean, 2), 0) / returns.length);
+    return std > 0 ? Number(((mean / std) * Math.sqrt(252)).toFixed(2)) : 0;
+  }, [analytics]);
+
+  // Max drawdown
+  const maxDrawdown = useMemo(() => {
+    if (analytics.length < 2) return 0;
+    let peak = analytics[0].portfolio_value;
+    let maxDD = 0;
+    analytics.forEach(d => {
+      if (d.portfolio_value > peak) peak = d.portfolio_value;
+      const dd = (peak - d.portfolio_value) / Math.max(peak, 1);
+      if (dd > maxDD) maxDD = dd;
+    });
+    return Number((maxDD * 100).toFixed(2));
+  }, [analytics]);
+
+  const pnlTone = (stats?.totalPnl || 0) >= 0 ? 'positive' : 'danger';
 
   return (
     <Layout>
-      <div className="max-w-[1600px] mx-auto space-y-12 pb-24">
-        {/* Sector Header */}
-        <MotionDiv 
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="flex flex-col md:flex-row md:items-end justify-between gap-6 border-b border-white/5 pb-12"
-        >
-          <div>
-            <div className="flex items-center gap-3 mb-4">
-               <div className="p-2 bg-blue-500/10 rounded-lg border border-blue-500/20">
-                  <FiBarChart2 className="text-blue-400 text-sm" />
-               </div>
-               <span className="text-blue-400 font-black tracking-[0.3em] uppercase text-[9px]">Intelligence Sector // Performance Registry</span>
-            </div>
-            <h1 className="text-6xl font-black tracking-tighter italic uppercase text-white leading-none">
-              INTELLIGENCE
-            </h1>
-            <p className="text-slate-500 font-bold uppercase tracking-[0.2em] text-[10px] mt-4">Autonomous Performance Tracking & Equity Analysis</p>
-          </div>
+      <div className="space-y-6">
+        <PageIntro
+          badge="Analytics"
+          title="Performance Intelligence"
+          description="Deep statistical analysis of your trading performance — win rate, Sharpe ratio, drawdown, and P&L by instrument."
+        />
 
-          <div className="flex gap-4">
-             <div className="glass-panel px-6 py-4 rounded-2xl flex items-center gap-4 bg-white/[0.01] border border-white/5">
-                <FiActivity className="text-indigo-400" />
-                <div>
-                   <p className="text-[8px] font-black text-slate-600 uppercase tracking-widest">Telemetry</p>
-                   <p className="text-[10px] font-bold text-white uppercase tracking-tighter">DATA_SYNC_ACTIVE</p>
-                </div>
-             </div>
-          </div>
-        </MotionDiv>
-
-        {/* Primary Health Metrics */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-           {[
-             { label: 'Observed Alpha', value: stats?.totalPnl, suffix: '₹', trend: pnlIsPositive },
-             { label: 'Equity Variance', value: stats?.returnPercentage, suffix: '%', trend: (stats?.returnPercentage || 0) >= 0 },
-             { label: 'Unrealized Delta', value: stats?.unrealizedPnl, suffix: '₹', trend: (stats?.unrealizedPnl || 0) >= 0 },
-           ].map((metric, i) => (
-             <MotionDiv 
-               key={i}
-               initial={{ opacity: 0, y: 20 }}
-               animate={{ opacity: 1, y: 0 }}
-               transition={{ delay: i * 0.1 }}
-               className="glass-panel p-8 rounded-[2.5rem] border border-white/5 bg-white/[0.01] relative overflow-hidden group shadow-xl"
-             >
-                <div className="relative z-10 flex justify-between items-start">
-                   <div>
-                      <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-4">{metric.label}</p>
-                      <h3 className={`text-4xl font-black italic tracking-tighter leading-none ${metric.trend ? 'text-emerald-400' : 'text-rose-400'}`}>
-                         {metric.suffix === '₹' && '₹'}{Math.abs(metric.value || 0).toLocaleString()}
-                         {metric.suffix === '%' && '%'}
-                      </h3>
-                   </div>
-                   <div className={`p-3 rounded-2xl ${metric.trend ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-rose-500/10 text-rose-400 border-rose-500/20'} border`}>
-                      {metric.trend ? <FiArrowUpRight className="text-xl" /> : <FiArrowDownRight className="text-xl" />}
-                   </div>
-                </div>
-                {/* Micro Chart Decor */}
-                <div className={`absolute bottom-0 left-0 right-0 h-1 ${metric.trend ? 'bg-emerald-500/20' : 'bg-rose-500/20'}`} />
-             </MotionDiv>
-           ))}
+        {/* Key Performance Metrics */}
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <MetricCard
+            label="Total P&L"
+            loading={loading}
+            value={`${(stats?.totalPnl || 0) >= 0 ? '+' : ''}₹${(stats?.totalPnl || 0).toLocaleString('en-IN')}`}
+            hint={(stats?.totalPnl || 0) >= 0 ? 'Profitable' : 'Loss'}
+            tone={pnlTone}
+            icon={<FiTrendingUp size={16} />}
+          />
+          <MetricCard
+            label="Return %"
+            loading={loading}
+            value={`${(stats?.returnPercentage || 0).toFixed(2)}%`}
+            hint="Net performance"
+            tone={(stats?.returnPercentage || 0) >= 0 ? 'positive' : 'danger'}
+            icon={<FiBarChart2 size={16} />}
+          />
+          <MetricCard
+            label="Realized P&L"
+            loading={loading}
+            value={`₹${(stats?.realizedPnl || 0).toLocaleString('en-IN')}`}
+            hint="Closed positions"
+            icon={<FiAward size={16} />}
+          />
+          <MetricCard
+            label="Unrealized P&L"
+            loading={loading}
+            value={`₹${(stats?.unrealizedPnl || 0).toLocaleString('en-IN')}`}
+            hint="Open positions"
+            icon={<FiTarget size={16} />}
+          />
         </div>
 
-        {/* High-Fidelity Equity Curve */}
-        <MotionDiv 
-          initial={{ opacity: 0, scale: 0.98 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ delay: 0.3 }}
-          className="glass-panel p-10 rounded-[3rem] border border-white/5 bg-white/[0.01] relative overflow-hidden"
-        >
-          <div className="flex justify-between items-center mb-10">
-             <div>
-                <h2 className="text-2xl font-black italic uppercase text-white tracking-tighter">Equity Velocity Stream</h2>
-                <p className="text-[10px] text-slate-600 font-bold uppercase tracking-widest mt-1 italic">Observed Portfolio Evolution // Real-Time Basis</p>
-             </div>
-             <div className="flex gap-2">
-                {['1H', '1D', '1W', 'ALL'].map(t => (
-                   <button key={t} className={`px-3 py-1 rounded-lg text-[10px] font-black ${t === '1D' ? 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30' : 'text-slate-600'}`}>{t}</button>
-                ))}
-             </div>
-          </div>
+        {/* Trading Statistics Row */}
+        <div className="grid gap-4 md:grid-cols-4">
+          {[
+            { label: 'Win Rate',      value: loading ? '—' : `${winRate.toFixed(1)}%`,   sub: `${wins}W / ${losses}L of ${totalTrades} trades`, color: winRate >= 50 ? 'text-emerald-600' : 'text-rose-600' },
+            { label: 'Profit Factor', value: loading ? '—' : profitFactor === Infinity ? '∞' : profitFactor.toFixed(2), sub: 'Avg Win / Avg Loss', color: profitFactor >= 1 ? 'text-emerald-600' : 'text-rose-600' },
+            { label: 'Sharpe Ratio',  value: loading ? '—' : sharpeRatio.toFixed(2),     sub: 'Annualised', color: sharpeRatio >= 1 ? 'text-emerald-600' : sharpeRatio >= 0 ? 'text-amber-600' : 'text-rose-600' },
+            { label: 'Max Drawdown',  value: loading ? '—' : `${maxDrawdown}%`,           sub: 'Peak-to-trough', color: maxDrawdown > 20 ? 'text-rose-600' : maxDrawdown > 10 ? 'text-amber-600' : 'text-emerald-600' },
+          ].map(({ label, value, sub, color }) => (
+            <div key={label} className="app-card-muted rounded-xl p-5 space-y-1">
+              <p className="data-label">{label}</p>
+              <p className={`text-2xl font-bold tabular-nums ${color}`}>{value}</p>
+              <p className="text-xs text-slate-400">{sub}</p>
+            </div>
+          ))}
+        </div>
 
-          <div className="h-[400px] w-full">
-            {loading ? (
-              <div className="h-full flex items-center justify-center">
-                 <div className="flex flex-col items-center gap-4">
-                    <div className="w-12 h-12 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-                    <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Awaiting Registry Sync...</p>
-                 </div>
+        <div className="grid gap-6 xl:grid-cols-[1.6fr_1fr]">
+          {/* Equity Curve */}
+          <SectionCard title="Portfolio Equity Curve" description="Historical portfolio value and session P&L trend.">
+            {analytics.length ? (
+              <div className="h-[300px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={analytics} margin={{ left: 10, right: 10 }}>
+                    <defs>
+                      <linearGradient id="valueFill" x1="0" x2="0" y1="0" y2="1">
+                        <stop offset="5%" stopColor="#2563eb" stopOpacity={0.18} />
+                        <stop offset="95%" stopColor="#2563eb" stopOpacity={0.01} />
+                      </linearGradient>
+                      <linearGradient id="pnlFill" x1="0" x2="0" y1="0" y2="1">
+                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.15} />
+                        <stop offset="95%" stopColor="#10b981" stopOpacity={0.01} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid vertical={false} stroke="#f1f5f9" />
+                    <XAxis dataKey="date" tick={{ fill: '#94a3b8', fontSize: 11 }} tickLine={false} axisLine={false} />
+                    <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} tickLine={false} axisLine={false} tickFormatter={v => `₹${(v/1000).toFixed(0)}k`} />
+                    <Tooltip content={<CustomTooltip />} />
+                    <Area type="monotone" dataKey="portfolio_value" name="Portfolio" stroke="#2563eb" fill="url(#valueFill)" strokeWidth={2.5} dot={false} />
+                    <Area type="monotone" dataKey="pnl" name="P&L" stroke="#10b981" fill="url(#pnlFill)" strokeWidth={1.5} dot={false} />
+                  </AreaChart>
+                </ResponsiveContainer>
               </div>
             ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={analytics}>
-                  <defs>
-                    <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#6366f1" stopOpacity={0.1}/>
-                      <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" vertical={false} />
-                  <XAxis 
-                    dataKey="date" 
-                    stroke="#475569" 
-                    fontSize={10} 
-                    fontWeight={900} 
-                    tickLine={false} 
-                    axisLine={false}
-                    tickFormatter={(val) => new Date(val).toLocaleDateString([], { month: 'short', day: 'numeric' })}
-                  />
-                  <YAxis 
-                    stroke="#475569" 
-                    fontSize={10} 
-                    fontWeight={900} 
-                    tickLine={false} 
-                    axisLine={false} 
-                    tickFormatter={(val) => `₹${(val / 1000).toFixed(0)}k`}
-                  />
-                  <Tooltip 
-                    contentStyle={{ backgroundColor: '#020617', border: '1px solid #ffffff10', borderRadius: '1.5rem', fontSize: '12px', fontWeight: '900' }}
-                    itemStyle={{ color: '#fff' }}
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="portfolio_value"
-                    stroke="#6366f1"
-                    strokeWidth={4}
-                    fillOpacity={1}
-                    fill="url(#colorValue)"
-                    name="Equity Basis"
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
+              <EmptyState title="No portfolio history" description="Portfolio snapshots will appear here as you trade." />
             )}
-          </div>
-        </MotionDiv>
+          </SectionCard>
 
-        {/* Global Compliance Footer */}
-        <p className="text-center text-[8px] text-slate-700 font-bold uppercase tracking-[0.4em] opacity-30 mt-12 pb-8">
-           Institutional Audit Trail Active // verified performance vector // Sovereign AI v2.0
-        </p>
+          {/* P&L by Symbol */}
+          <SectionCard title="P&L by Instrument" description="Realized profit & loss breakdown per symbol.">
+            {pnlBySymbolData.length ? (
+              <div className="h-[300px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={pnlBySymbolData} layout="vertical" margin={{ left: 16, right: 16 }}>
+                    <CartesianGrid horizontal={false} stroke="#f1f5f9" />
+                    <XAxis type="number" tick={{ fill: '#94a3b8', fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={v => `₹${(v/1000).toFixed(0)}k`} />
+                    <YAxis type="category" dataKey="symbol" tick={{ fill: '#475569', fontSize: 11, fontWeight: 600 }} tickLine={false} axisLine={false} width={72} />
+                    <Tooltip content={<CustomTooltip />} />
+                    <Bar dataKey="pnl" name="P&L" radius={[0, 4, 4, 0]}>
+                      {pnlBySymbolData.map((entry, i) => (
+                        <Cell key={i} fill={entry.pnl >= 0 ? '#10b981' : '#f43f5e'} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            ) : loading ? (
+              <div className="h-[300px] flex items-center justify-center"><p className="text-xs text-slate-400">Loading analytics…</p></div>
+            ) : (
+              <EmptyState title="No closed trades yet" description="P&L will appear once you have executed and closed positions." />
+            )}
+          </SectionCard>
+        </div>
+
+        {/* Trade Frequency by Day */}
+        {analytics.length > 0 && (
+          <SectionCard title="Daily Trade Volume" description="Number of trades executed each day.">
+            <div className="h-[160px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={analytics} margin={{ left: 10, right: 10 }}>
+                  <CartesianGrid vertical={false} stroke="#f1f5f9" />
+                  <XAxis dataKey="date" tick={{ fill: '#94a3b8', fontSize: 11 }} tickLine={false} axisLine={false} />
+                  <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} tickLine={false} axisLine={false} allowDecimals={false} />
+                  <Tooltip />
+                  <Bar dataKey="trades" name="Trades" fill="#6366f1" radius={[3, 3, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </SectionCard>
+        )}
       </div>
     </Layout>
   );

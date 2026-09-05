@@ -1,148 +1,312 @@
-import React from 'react';
-import Link from 'next/link';
-import { useRouter, usePathname } from 'next/navigation';
-import { 
-  FiLogOut, 
-  FiHome, 
-  FiTrendingUp, 
-  FiSettings, 
-  FiBarChart2, 
-  FiList, 
-  FiCpu,
-  FiShield,
-  FiActivity
-} from 'react-icons/fi';
-import { MotionAside, MotionDiv } from '@/components/Motion';
+'use client';
 
-interface LayoutProps {
-  children: React.ReactNode;
+import React, { useState, useEffect, useCallback } from 'react';
+import Link from 'next/link';
+import { usePathname, useRouter } from 'next/navigation';
+import {
+  FiActivity, FiBarChart2, FiChevronRight, FiChevronLeft, FiCpu,
+  FiGrid, FiList, FiLogOut, FiMenu, FiSettings,
+  FiTrendingUp, FiX, FiWifi, FiWifiOff, FiBell,
+  FiArrowUpRight, FiArrowDownRight, FiDollarSign,
+} from 'react-icons/fi';
+import { useWebSocket } from '@/contexts/WebSocketContext';
+import { ConnectionStatus } from './ConnectionStatus';
+import { ThemeSwitcher } from './ThemeSwitcher';
+import axios from 'axios';
+import toast from 'react-hot-toast';
+
+interface LayoutProps { children: React.ReactNode; }
+
+const navItems = [
+  { href: '/dashboard', label: 'Overview', icon: FiGrid },
+  { href: '/trading', label: 'Trading Desk', icon: FiTrendingUp },
+  { href: '/signals', label: 'AI Signals', icon: FiCpu },
+  { href: '/analytics', label: 'Analytics', icon: FiBarChart2 },
+  { href: '/orders', label: 'Orders', icon: FiList },
+  { href: '/settings', label: 'Settings', icon: FiSettings },
+];
+
+interface PortfolioMini { cash: number; totalValue: number; totalPnl: number; }
+
+export interface PriceAlert {
+  id: string;
+  symbol: string;
+  targetPrice: number;
+  direction: 'ABOVE' | 'BELOW';
+  triggered: boolean;
+  createdAt: string;
 }
 
 export const Layout: React.FC<LayoutProps> = ({ children }) => {
-  const router = useRouter();
   const pathname = usePathname();
+  const router = useRouter();
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [clock, setClock] = useState('');
+  const { status: wsStatus, latencyMs, subscribe } = useWebSocket();
+  const [portfolioMini, setPortfolioMini] = useState<PortfolioMini | null>(null);
+  const [alertCount, setAlertCount] = useState(0);
+
+  // ── Navbar Collapse / Hide Toggle ───────────────────────────────────────────
+  const [navbarCollapsed, setNavbarCollapsed] = useState(false);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('sovereign_navbar_collapsed');
+      if (saved !== null) setNavbarCollapsed(saved === 'true');
+    } catch { /* ignore */ }
+  }, []);
+
+  const toggleNavbar = () => {
+    setNavbarCollapsed(prev => {
+      const next = !prev;
+      try { localStorage.setItem('sovereign_navbar_collapsed', String(next)); } catch { }
+      return next;
+    });
+  };
+
+  // Shortcut: Ctrl+B or Cmd+B to toggle navbar
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'b' || e.key === 'B')) {
+        e.preventDefault();
+        toggleNavbar();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  const [userName, setUserName] = useState('User');
+
+  useEffect(() => {
+    try {
+      const stored = (JSON.parse(localStorage.getItem('user') || '{}') as { name?: string }).name;
+      if (stored) setUserName(stored);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const userInitials = userName.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase();
+
+  useEffect(() => {
+    const tick = () => setClock(new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const fetchPortfolioMini = useCallback(async () => {
+    if (typeof window === 'undefined') return;
+    const token = localStorage.getItem('token') || localStorage.getItem('accessToken') || '';
+    const userId = localStorage.getItem('userId') || '';
+    if (!token || !userId) return;
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
+    try {
+      const [pRes, plRes] = await Promise.all([
+        axios.get(`${apiUrl}/api/v1/portfolio/${userId}`, { headers: { Authorization: `Bearer ${token}` }, timeout: 6000 }),
+        axios.get(`${apiUrl}/api/v1/portfolio/${userId}/pnl`, { headers: { Authorization: `Bearer ${token}` }, timeout: 6000 }),
+      ]);
+      setPortfolioMini({ cash: pRes.data?.cash || 0, totalValue: pRes.data?.totalValue || 0, totalPnl: plRes.data?.totalPnl || 0 });
+    } catch { /* non-critical */ }
+  }, []);
+
+  useEffect(() => {
+    fetchPortfolioMini();
+    const id = setInterval(fetchPortfolioMini, 30000);
+    return () => clearInterval(id);
+  }, [fetchPortfolioMini]);
+
+  useEffect(() => subscribe('PORTFOLIO_UPDATES', (data: any) => {
+    if (data?.cash !== undefined) setPortfolioMini(prev => prev ? { ...prev, cash: data.cash ?? prev.cash, totalValue: data.totalValue ?? prev.totalValue } : prev);
+  }), [subscribe]);
+
+  // Real-time price alert evaluation
+  useEffect(() => subscribe('PRICE_UPDATES', (data: any) => {
+    if (!data?.symbol || !data?.price || typeof window === 'undefined') return;
+    try {
+      const alerts: PriceAlert[] = JSON.parse(localStorage.getItem('priceAlerts') || '[]');
+      let changed = false;
+      const updated = alerts.map(a => {
+        if (a.triggered || a.symbol !== data.symbol) return a;
+        const hit = (a.direction === 'ABOVE' && data.price >= a.targetPrice) || (a.direction === 'BELOW' && data.price <= a.targetPrice);
+        if (hit) {
+          toast(`🔔 ${a.symbol} ${a.direction === 'ABOVE' ? '📈' : '📉'} hit ₹${a.targetPrice.toFixed(2)}`, { duration: 8000 });
+          changed = true;
+          return { ...a, triggered: true };
+        }
+        return a;
+      });
+      if (changed) { localStorage.setItem('priceAlerts', JSON.stringify(updated)); setAlertCount(updated.filter(a => !a.triggered).length); }
+    } catch { /* ignore */ }
+  }), [subscribe]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try { setAlertCount((JSON.parse(localStorage.getItem('priceAlerts') || '[]') as PriceAlert[]).filter(a => !a.triggered).length); }
+    catch { setAlertCount(0); }
+  }, []);
 
   const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    localStorage.removeItem('userId');
+    ['accessToken', 'token', 'refreshToken', 'accessTokenExpiry', 'user', 'userId'].forEach(k => localStorage.removeItem(k));
     router.push('/login');
   };
 
-  const isActive = (path: string) => pathname === path;
-
-  const navItems = [
-    { href: '/dashboard', label: 'Command Center', icon: FiHome },
-    { href: '/trading', label: 'Execution', icon: FiTrendingUp },
-    { href: '/signals', label: 'Neural Alpha', icon: FiCpu },
-    { href: '/analytics', label: 'Intelligence', icon: FiBarChart2 },
-    { href: '/orders', label: 'Registry', icon: FiList },
-    { href: '/settings', label: 'Protocols', icon: FiSettings },
-  ];
+  const pageName = navItems.find(item => pathname?.startsWith(item.href))?.label || 'Workspace';
+  const wsLabel = wsStatus === 'connected' ? 'Live' : wsStatus === 'connecting' ? 'Connecting' : 'Offline';
+  const wsStatusClass = wsStatus === 'connected' ? 'status-pill-success' : wsStatus === 'connecting' ? 'status-pill-warning' : 'status-pill-danger';
+  const pnlPositive = (portfolioMini?.totalPnl || 0) >= 0;
 
   return (
-    <div className="flex h-screen bg-[#020617] text-slate-50 font-sans selection:bg-indigo-500/30 overflow-hidden">
-      {/* Sidebar */}
-      <MotionAside 
-        initial={{ x: -20, opacity: 0 }}
-        animate={{ x: 0, opacity: 1 }}
-        className="w-80 bg-white/[0.01] border-r border-white/5 flex flex-col relative z-20 backdrop-blur-3xl"
+    <div className="app-shell" style={{ gridTemplateColumns: navbarCollapsed ? '1fr' : undefined }}>
+      <ConnectionStatus />
+
+      {/* Navigation Bar (Sidebar) */}
+      <aside
+        className={`sidebar-surface fixed inset-y-0 left-0 z-40 flex flex-col transition-all duration-300 ${navbarCollapsed ? 'lg:hidden -translate-x-full' : 'lg:static lg:translate-x-0'
+          } ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`}
+        style={{ width: 'var(--sidebar-w)' }}
       >
-        {/* Brand Header */}
-        <div className="p-10 mb-8">
-          <div className="flex items-center gap-3 mb-4">
-             <div className="p-2 bg-indigo-500/10 rounded-lg border border-indigo-500/20">
-                <FiShield className="text-indigo-400 text-sm" />
-             </div>
-             <span className="text-indigo-400 font-black tracking-[0.3em] uppercase text-[9px]">Sovereign // Agent</span>
-          </div>
-          <h1 className="text-3xl font-black tracking-tighter italic uppercase text-white leading-none">
-            SOVEREIGN
-          </h1>
-          <p className="text-[10px] text-slate-600 font-bold uppercase tracking-[0.15em] mt-2">Asset Orchestrator v2.0</p>
-        </div>
-
-        {/* Navigation Section */}
-        <nav className="flex-1 px-6 space-y-2">
-          {navItems.map(({ href, label, icon: Icon }) => {
-            const active = isActive(href);
-            return (
-              <Link
-                key={href}
-                href={href}
-                className={`group flex items-center px-6 py-4 rounded-[1.5rem] transition-all relative overflow-hidden ${
-                  active
-                    ? 'bg-white/[0.03] text-white border border-white/10 shadow-xl'
-                    : 'text-slate-500 hover:text-slate-200 hover:bg-white/[0.01]'
-                }`}
+        <div className="flex h-full flex-col p-4">
+          {/* Brand */}
+          <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-4">
+            <div>
+              <p className="eyebrow">Enterprise Suite</p>
+              <h1 className="mt-1 text-base font-bold tracking-tight text-slate-900">Sovereign AI</h1>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={toggleNavbar}
+                title="Collapse Navigation Bar (Ctrl+B)"
+                className="hidden lg:inline-flex rounded-lg border border-slate-200 p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
               >
-                {active && (
-                  <MotionDiv 
-                    layoutId="nav-active"
-                    className="absolute left-0 w-1 h-6 bg-indigo-500 rounded-r-full shadow-[0_0_10px_rgba(99,102,241,0.5)]"
-                  />
-                )}
-                <Icon className={`mr-4 text-lg ${active ? 'text-indigo-400' : 'group-hover:text-indigo-300'} transition-colors`} /> 
-                <span className="text-[11px] font-black uppercase tracking-widest">{label}</span>
+                <FiChevronLeft size={16} />
+              </button>
+              <button type="button" onClick={() => setMobileOpen(false)} className="rounded-lg border border-slate-200 p-1.5 text-slate-500 hover:bg-slate-50 lg:hidden"><FiX size={16} /></button>
+            </div>
+          </div>
+
+          {/* Live Portfolio Widget */}
+          {portfolioMini && (
+            <div className="mb-4 rounded-xl border border-blue-100 bg-gradient-to-br from-blue-50 to-indigo-50/60 p-3 space-y-2">
+              <p className="data-label flex items-center gap-1.5"><FiDollarSign size={11} className="text-blue-500" /> Portfolio</p>
+              <div className="flex items-end justify-between">
+                <div>
+                  <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">Total Value</p>
+                  <p className="text-lg font-bold text-slate-900 tabular-nums leading-tight">
+                    ₹{portfolioMini.totalValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                  </p>
+                </div>
+                <span className={`flex items-center gap-0.5 text-sm font-bold ${pnlPositive ? 'text-emerald-600' : 'text-rose-600'}`}>
+                  {pnlPositive ? <FiArrowUpRight size={13} /> : <FiArrowDownRight size={13} />}
+                  {pnlPositive ? '+' : ''}₹{Math.abs(portfolioMini.totalPnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                </span>
+              </div>
+              <div className="flex justify-between text-xs text-slate-400 pt-1.5 border-t border-blue-100/80">
+                <span>Cash</span>
+                <span className="font-semibold text-slate-600 tabular-nums">₹{portfolioMini.cash.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
+              </div>
+            </div>
+          )}
+
+          {/* Status Card */}
+          <div className={`mb-4 rounded-xl border p-3 ${wsStatus === 'connected' ? 'border-emerald-100 bg-emerald-50/60' : 'border-slate-100 bg-slate-50'}`}>
+            <p className="data-label mb-2">System Status</p>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500 text-xs">Market data</span>
+                <span className={`status-pill ${wsStatusClass}`}>
+                  {wsStatus === 'connected' ? <span className="live-dot" /> : wsStatus === 'connecting' ? <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse inline-block" /> : <span className="live-dot-danger" />}
+                  {wsLabel}
+                </span>
+              </div>
+              {latencyMs !== null && wsStatus === 'connected' && (
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500 text-xs">Latency</span>
+                  <span className="font-mono text-xs text-slate-700 tabular-nums">{latencyMs} ms</span>
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500 text-xs">Session</span>
+                <span className="font-mono text-xs text-slate-700 tabular-nums">{clock}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Navigation Links */}
+          <nav className="flex-1 space-y-0.5" aria-label="Main navigation">
+            {navItems.map(({ href, label, icon: Icon }) => {
+              const active = pathname?.startsWith(href);
+              return (
+                <Link key={href} href={href} onClick={() => setMobileOpen(false)} aria-current={active ? 'page' : undefined} className={`sidebar-link ${active ? 'sidebar-link-active' : ''}`}>
+                  <Icon size={16} /><span className="flex-1">{label}</span>{active && <FiChevronRight size={14} />}
+                </Link>
+              );
+            })}
+          </nav>
+
+          {/* User Profile */}
+          <div className="mt-auto pt-4 border-t border-slate-100">
+            <div className="flex items-center gap-3 mb-3">
+              <div suppressHydrationWarning className="flex h-9 w-9 items-center justify-center rounded-full text-white text-sm font-bold shrink-0" style={{ background: 'var(--primary)' }}>{userInitials}</div>
+              <div className="min-w-0">
+                <p suppressHydrationWarning className="truncate text-sm font-semibold text-slate-900">{userName}</p>
+                <p className="text-xs text-slate-500">Enterprise workspace</p>
+              </div>
+            </div>
+            <button type="button" onClick={handleLogout} className="secondary-button w-full text-xs"><FiLogOut size={14} /> Sign out</button>
+          </div>
+        </div>
+      </aside>
+
+      {mobileOpen && (<button type="button" aria-label="Close navigation" className="fixed inset-0 z-30 bg-slate-900/20 backdrop-blur-sm lg:hidden" onClick={() => setMobileOpen(false)} />)}
+
+      <div className="flex min-h-screen flex-col">
+        {/* Workspace Header */}
+        <header className="sticky top-0 z-20 border-b border-slate-200/80 bg-white/90 backdrop-blur-sm transition-all duration-200">
+          <div className="flex h-14 items-center justify-between px-4 sm:px-6">
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+                    setMobileOpen(!mobileOpen);
+                  } else {
+                    toggleNavbar();
+                  }
+                }}
+                title={navbarCollapsed ? "Expand Navigation Bar (Ctrl+B)" : "Collapse Navigation Bar (Ctrl+B)"}
+                className="rounded-lg border border-slate-200 p-1.5 text-slate-500 hover:bg-slate-50 hover:text-slate-900 transition-colors"
+              >
+                <FiMenu size={16} />
+              </button>
+              <div>
+                <p className="text-xs text-slate-400 leading-none mb-0.5">Workspace</p>
+                <h2 className="text-sm font-semibold text-slate-900">{pageName}</h2>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <ThemeSwitcher variant="header" />
+              {portfolioMini && (
+                <span className={`hidden md:inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-bold tabular-nums ${pnlPositive ? 'bg-emerald-50 border-emerald-100 text-emerald-700' : 'bg-rose-50 border-rose-100 text-rose-700'}`}>
+                  {pnlPositive ? <FiArrowUpRight size={11} /> : <FiArrowDownRight size={11} />}
+                  {pnlPositive ? '+' : ''}₹{Math.abs(portfolioMini.totalPnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })} P&L
+                </span>
+              )}
+              <Link href="/settings#alerts" className="relative hidden md:inline-flex items-center justify-center w-8 h-8 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 transition-colors">
+                <FiBell size={14} />
+                {alertCount > 0 && <span className="absolute -top-1 -right-1 w-4 h-4 flex items-center justify-center rounded-full bg-blue-600 text-white text-[9px] font-bold">{alertCount > 9 ? '9+' : alertCount}</span>}
               </Link>
-            );
-          })}
-        </nav>
-
-        {/* System Intelligence Matrix */}
-        <div className="p-8 m-6 rounded-[2rem] bg-indigo-500/5 border border-indigo-500/10 relative overflow-hidden group">
-           <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-              <FiActivity className="text-3xl text-indigo-400" />
-           </div>
-           <p className="text-[10px] font-black text-indigo-300/60 uppercase tracking-widest mb-3 italic underline decoration-indigo-500/30 underline-offset-4">Fleet Status</p>
-           <div className="space-y-4">
-              <div className="flex justify-between items-center">
-                 <span className="text-[9px] font-bold text-slate-600 uppercase tracking-tighter">API Liveness</span>
-                 <span className="text-[9px] font-mono text-emerald-400 font-black tracking-tighter">NOMINAL</span>
-              </div>
-              <div className="flex justify-between items-center">
-                 <span className="text-[9px] font-bold text-slate-600 uppercase tracking-tighter">Vault Latency</span>
-                 <span className="text-[9px] font-mono text-blue-400 font-black tracking-tighter">0.14ms</span>
-              </div>
-           </div>
-        </div>
-
-        {/* Action Section */}
-        <div className="p-8 border-t border-white/5 space-y-4">
-          <button
-            onClick={handleLogout}
-            className="w-full flex items-center justify-center px-6 py-4 bg-white/[0.02] hover:bg-rose-500/10 hover:text-rose-400 group border border-white/5 hover:border-rose-500/20 rounded-[1.5rem] transition-all text-slate-600"
-          >
-            <FiLogOut className="mr-3 text-lg group-hover:text-rose-400 transition-colors" /> 
-            <span className="text-[11px] font-black uppercase tracking-widest">Terminate Session</span>
-          </button>
-        </div>
-      </MotionAside>
-
-      {/* Main Orchestration Viewport */}
-      <main className="flex-1 overflow-auto relative z-10 custom-scrollbar">
-        {/* Content Container */}
-        <div className="p-4 md:p-8">
-           {children}
-        </div>
-      </main>
-
-      {/* Global CSS for scrollbars */}
-      <style jsx global>{`
-        .custom-scrollbar::-webkit-scrollbar {
-          width: 5px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-track {
-          background: transparent;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-          background: rgba(255, 255, 255, 0.05);
-          border-radius: 10px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-          background: rgba(255, 255, 255, 0.1);
-        }
-      `}</style>
+              {wsStatus === 'connected'
+                ? <span className="hidden md:inline-flex items-center gap-1.5 rounded-full bg-emerald-50 border border-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700"><FiWifi size={11} /> Live sync</span>
+                : <span className="hidden md:inline-flex items-center gap-1.5 rounded-full bg-slate-100 border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-600"><FiWifiOff size={11} /> Offline</span>}
+              <span className="hidden md:inline-flex items-center gap-1.5 rounded-full bg-slate-50 border border-slate-100 px-2.5 py-1 text-xs font-mono text-slate-600 tabular-nums"><FiActivity size={11} /> {clock}</span>
+            </div>
+          </div>
+        </header>
+        <main className="flex-1 px-4 py-6 sm:px-6 lg:px-8">{children}</main>
+      </div>
     </div>
   );
 };

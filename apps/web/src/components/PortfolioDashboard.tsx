@@ -1,9 +1,10 @@
 'use client';
 
-import { MotionDiv } from '@/components/Motion';
-import { AnimatePresence } from 'framer-motion';
-import { FiBriefcase, FiTarget, FiActivity, FiArrowUpRight, FiArrowDownRight } from 'react-icons/fi';
+import React from 'react';
+import { FiBriefcase, FiTarget, FiActivity, FiArrowUpRight, FiArrowDownRight, FiPackage } from 'react-icons/fi';
 import { useRealtimePortfolio, useRealtimeOrders } from '@/hooks/useRealtime';
+import { StatusBadge, EmptyState } from './EnterpriseUI';
+import { MotionDiv, AnimatePresence } from './Motion';
 
 interface PortfolioDashboardProps {
   token: string;
@@ -11,228 +12,186 @@ interface PortfolioDashboardProps {
   isPaper?: boolean;
 }
 
+const US_SYMBOLS = new Set(['AAPL','MSFT','GOOGL','AMZN','NVDA','TSLA','META','GOOG','NFLX','AMD']);
+const currencySymbol = (sym: string) => US_SYMBOLS.has(sym) ? '$' : '₹';
+
 export function PortfolioDashboard({ token, userId, isPaper = false }: PortfolioDashboardProps) {
   const { portfolio, connected: portfolioConnected, error: portfolioError } = useRealtimePortfolio(token, userId, isPaper);
   const { orders, connected: ordersConnected } = useRealtimeOrders(token, isPaper);
 
   return (
-    <div className="space-y-10">
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-10">
-        {/* 1. PORTFOLIO SUMMARY CARD */}
-        <MotionDiv 
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            className="xl:col-span-2 glass-panel rounded-[3rem] p-12 border-glow relative overflow-hidden h-full flex flex-col justify-between"
-        >
-          <div className="absolute top-0 right-0 p-16 opacity-[0.03]">
-            <FiBriefcase className="text-[15rem]" />
+    <div className="space-y-5">
+      {/* Portfolio Summary */}
+      <div className="section-card">
+        <div className="section-card-header">
+          <div className="flex items-center gap-2.5">
+            <div className="rounded-lg border border-blue-100 bg-blue-50 p-2">
+              <FiBriefcase className="text-blue-600" size={15} />
+            </div>
+            <h3 className="section-title">Sovereign Equity</h3>
           </div>
+          <StatusBadge status={portfolioConnected ? 'connected' : 'disconnected'} label={portfolioConnected ? 'Live' : 'Offline'} />
+        </div>
 
-          <div>
-             <div className="flex justify-between items-center mb-12 border-b border-white/5 pb-8">
-                <div className="flex items-center gap-5">
-                    <div className="p-4 bg-indigo-500/10 rounded-3xl border border-indigo-500/20">
-                        <FiBriefcase className="text-indigo-400 text-3xl" />
-                    </div>
-                    <div>
-                        <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">Asset Intelligence</p>
-                        <h3 className="text-3xl font-black italic tracking-tighter uppercase text-gradient-sovereign">Sovereign Equity</h3>
-                    </div>
-                </div>
-                <div className={`px-5 py-2 rounded-full text-[10px] font-black uppercase tracking-[0.2em] border transition-all ${portfolioConnected ? 'border-emerald-500/30 text-emerald-400 bg-emerald-500/5' : 'border-rose-500/30 text-rose-400 bg-rose-500/5'}`}>
-                   {portfolioConnected ? 'CONNECTED' : 'DISCONNECTED'}
-                </div>
-             </div>
-
-             {portfolioError && (
-               <div className="mb-8 p-6 rounded-3xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs font-bold uppercase tracking-widest flex items-center gap-3">
-                 <span>⚠️</span> PORTFOLIO_FAULT: {portfolioError}
-               </div>
-             )}
-
-             {portfolio ? (
-               <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                  <div className="p-10 bg-white/[0.02] rounded-[2.5rem] border border-white/5 group hover:bg-white/[0.04] transition-all">
-                    <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-3">Unified Liquidity</p>
-                    <div className="space-y-4">
-                      {portfolio.balances ? portfolio.balances.map((b: any) => (
-                        <div key={b.currency} className="flex justify-between items-end">
-                           <span className="text-[10px] font-bold text-slate-600">{b.currency}</span>
-                           <p className="text-3xl font-black italic tracking-tighter">
-                             {b.currency === 'INR' ? '₹' : '$'}{ (Number(b.cash) / 100).toLocaleString(b.currency === 'INR' ? 'en-IN' : 'en-US') }
-                           </p>
-                        </div>
-                      )) : (
-                        <p className="text-5xl font-black italic tracking-tighter">
-                          ₹{portfolio.totalValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-
-                 <div className="p-10 bg-white/[0.02] rounded-[2.5rem] border border-white/5 group hover:bg-white/[0.04] transition-all">
-                   <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-3">Absolute Gain</p>
-                   <div className="flex items-end gap-2">
-                     <p className={`text-4xl font-black italic tracking-tighter ${portfolio.totalGain >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {portfolio.totalGain >= 0 ? '+' : ''}₹{Math.abs(portfolio.totalGain).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-                     </p>
-                     {portfolio.totalGain >= 0 ? <FiArrowUpRight className="text-emerald-400 text-2xl mb-1" /> : <FiArrowDownRight className="text-rose-400 text-2xl mb-1" />}
-                   </div>
-                 </div>
-
-                 <div className="p-10 bg-white/[0.02] rounded-[2.5rem] border border-white/5 group hover:bg-white/[0.04] transition-all">
-                   <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-3">Alpha Variance</p>
-                   <p className={`text-5xl font-black italic tracking-tighter ${portfolio.gainPercent >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                     {portfolio.gainPercent >= 0 ? '+' : ''}{portfolio.gainPercent.toFixed(2)}<span className="text-xl opacity-40">%</span>
-                   </p>
-                 </div>
-               </div>
-             ) : (
-               <div className="h-40 flex items-center justify-center opacity-20">
-                 <p className="text-[10px] font-black uppercase tracking-widest animate-pulse">Synchronizing Ledger...</p>
-               </div>
-             )}
-          </div>
-
-          {portfolio && (
-            <div className="mt-12 text-[9px] font-black text-slate-600 uppercase tracking-widest italic flex justify-between">
-                <span>Last Reconciliation: {new Date(portfolio.timestamp).toLocaleTimeString()}</span>
-                <span>Audit Ref: SOV-{userId.slice(0,6).toUpperCase()}</span>
+        <div className="p-5">
+          {portfolioError && (
+            <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-semibold text-amber-800 flex items-center gap-2">
+              ⚠️ {portfolioError}
             </div>
           )}
-        </MotionDiv>
 
-        {/* 2. RECENT ORDERS STREAM */}
-        <MotionDiv 
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            className="glass-panel rounded-[3rem] p-10 border-glow h-full flex flex-col"
-        >
-          <div className="flex justify-between items-center mb-10 border-b border-white/5 pb-6">
-            <h3 className="text-lg font-black italic tracking-tighter uppercase flex items-center gap-3">
-              <FiActivity className="text-blue-400" /> ORDER_STREAM
-            </h3>
-            <div className={`w-2 h-2 rounded-full ${ordersConnected ? 'bg-emerald-400 animate-ping' : 'bg-rose-400'}`} />
-          </div>
+          {portfolio ? (
+            <>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+                {/* Total Value */}
+                <div className="app-card-muted rounded-xl p-4">
+                  <p className="data-label">Total Value</p>
+                  <p className="mt-2 text-2xl font-bold text-slate-900 tabular-nums">
+                    {portfolio.balances
+                      ? portfolio.balances.map((b) => (
+                          <span key={b.currency} className="block">
+                            {b.currency === 'INR' ? '₹' : '$'}{(Number(b.cash) / 100).toLocaleString()}
+                          </span>
+                        ))
+                      : `₹${portfolio.totalValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`}
+                  </p>
+                </div>
 
-          <div className="flex-1 space-y-4 overflow-y-auto max-h-[500px] pr-2 custom-scrollbar">
-            <AnimatePresence mode="popLayout">
-                {orders && orders.length > 0 ? (
-                  orders.slice(0, 15).map((order) => (
-                    <MotionDiv 
-                      key={order.orderId}
-                      initial={{ opacity: 0, scale: 0.98 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      className="p-5 bg-white/[0.02] rounded-3xl border border-white/5 flex justify-between items-center group hover:bg-white/[0.04] transition-all"
-                    >
-                      <div>
-                        <p className="text-[9px] font-black text-slate-600 uppercase tracking-widest mb-1">REQ_ACK_{order.orderId.slice(0, 6)}</p>
-                        <div className="flex items-center gap-3">
-                            <span className={`text-[10px] px-2 py-0.5 rounded-md font-black uppercase ${order.status === 'EXECUTED' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-amber-500/10 text-amber-400'}`}>
-                                {order.status}
-                            </span>
-                            <span className="text-sm font-black italic uppercase tracking-tighter text-slate-300">{order.symbol || 'SYSTEM'}</span>
-                        </div>
-                        {order.memo && (
-                          <p className="mt-2 text-[8px] font-bold text-blue-400/60 leading-tight italic max-w-[150px]">
-                            "{order.memo}"
-                          </p>
-                        )}
-                      </div>
-                      <div className="text-right">
-                        <p className="text-sm font-black italic tracking-tighter">
-                            {order.executedPrice ? `${order.symbol?.match(/^[A-Z]{1,5}$/) && !['RELIANCE', 'TCS', 'INFY', 'WIPRO'].includes(order.symbol) ? '$' : '₹'}${order.executedPrice.toLocaleString()}` : 'PENDING'}
-                        </p>
-                        <p className="text-[8px] font-bold text-slate-600 uppercase italic">
-                            {new Date(order.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                        </p>
-                      </div>
-                    </MotionDiv>
-                  ))
-                ) : (
-                  <div className="h-full flex flex-col items-center justify-center opacity-10 py-20">
-                    <FiActivity className="text-6xl mb-4" />
-                    <p className="text-[10px] font-black uppercase tracking-[0.2em]">Zero Activity Clusters</p>
+                {/* Absolute Gain */}
+                <div className="app-card-muted rounded-xl p-4">
+                  <p className="data-label">Absolute Gain</p>
+                  <div className="mt-2 flex items-center gap-1.5">
+                    {portfolio.totalGain >= 0
+                      ? <FiArrowUpRight className="text-emerald-600 shrink-0" size={18} />
+                      : <FiArrowDownRight className="text-red-600 shrink-0" size={18} />}
+                    <p className={`text-2xl font-bold tabular-nums ${portfolio.totalGain >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                      {portfolio.totalGain >= 0 ? '+' : ''}₹{Math.abs(portfolio.totalGain).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                    </p>
                   </div>
-                )}
-            </AnimatePresence>
-          </div>
-        </MotionDiv>
+                </div>
+
+                {/* Return % */}
+                <div className="app-card-muted rounded-xl p-4">
+                  <p className="data-label">Return %</p>
+                  <p className={`mt-2 text-2xl font-bold tabular-nums ${portfolio.gainPercent >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                    {portfolio.gainPercent >= 0 ? '+' : ''}{portfolio.gainPercent.toFixed(2)}%
+                  </p>
+                </div>
+              </div>
+
+              <p className="text-xs text-slate-400 tabular-nums">
+                Last sync: {new Date(portfolio.timestamp).toLocaleTimeString()} · Ref: SOV-{userId.slice(0, 6).toUpperCase()}
+              </p>
+            </>
+          ) : (
+            <div className="space-y-3">
+              {[1, 2, 3].map(i => (
+                <div key={i} className="skeleton h-12 rounded-xl" />
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* 3. ASSET POSITIONS LEDGER */}
-      <MotionDiv 
-          initial={{ opacity: 0, y: 30 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="glass-panel rounded-[3rem] p-12 border-glow"
-      >
-        <div className="flex justify-between items-center mb-12 border-b border-white/5 pb-8">
-            <div className="flex items-center gap-5">
-                <div className="p-4 bg-emerald-500/10 rounded-3xl border border-emerald-500/20">
-                    <FiTarget className="text-emerald-400 text-3xl" />
-                </div>
-                <div>
-                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">Operational Exposure</p>
-                    <h3 className="text-3xl font-black italic tracking-tighter uppercase text-gradient-sovereign">Active Ledger</h3>
-                </div>
+      {/* Orders Stream + Positions in a grid */}
+      <div className="grid gap-5 xl:grid-cols-[1fr_1.4fr]">
+        {/* Orders Stream */}
+        <div className="section-card">
+          <div className="section-card-header">
+            <div className="flex items-center gap-2.5">
+              <div className="rounded-lg border border-slate-100 bg-slate-50 p-2">
+                <FiActivity className="text-slate-600" size={15} />
+              </div>
+              <h3 className="section-title">Order Stream</h3>
             </div>
-            <div className="text-right">
-                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Aggregate Positions</p>
-                <p className="text-2xl font-black italic tracking-tighter">{portfolio?.positions?.length || 0}</p>
-            </div>
+            <StatusBadge status={ordersConnected ? 'connected' : 'disconnected'} label={ordersConnected ? 'Live' : 'Offline'} />
+          </div>
+          <div className="p-4 space-y-2 max-h-72 overflow-y-auto">
+            <AnimatePresence mode="popLayout">
+              {orders && orders.length > 0 ? (
+                orders.slice(0, 12).map((order) => (
+                  <MotionDiv
+                    key={order.orderId}
+                    initial={{ opacity: 0, y: -4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.98 }}
+                    className="flex items-center justify-between rounded-xl border border-slate-100 bg-slate-50/50 px-3 py-2.5 hover:bg-white hover:border-slate-200 transition-all"
+                  >
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${order.status === 'EXECUTED' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                          {order.status}
+                        </span>
+                        <span className="text-sm font-semibold text-slate-800">{order.symbol || 'SYSTEM'}</span>
+                      </div>
+                      {order.memo && <p className="mt-1 text-xs text-blue-500/70 italic">{order.memo}</p>}
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-semibold text-slate-700 tabular-nums">
+                        {order.executedPrice ? `${currencySymbol(order.symbol || '')}${order.executedPrice.toLocaleString()}` : 'PENDING'}
+                      </p>
+                      <p className="text-xs text-slate-400 tabular-nums">
+                        {new Date(order.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                      </p>
+                    </div>
+                  </MotionDiv>
+                ))
+              ) : (
+                <div className="py-8">
+                  <EmptyState title="No orders yet" description="Executed orders will appear here in real time." />
+                </div>
+              )}
+            </AnimatePresence>
+          </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
-          {portfolio?.positions && portfolio.positions.length > 0 ? (
-            portfolio.positions.map((position) => (
-              <MotionDiv 
-                whileHover={{ scale: 1.02 }}
-                key={position.symbol} 
-                className="p-8 bg-white/[0.01] rounded-[2.5rem] border border-white/5 relative group overflow-hidden"
-              >
-                <div className="absolute top-0 right-0 p-6 opacity-[0.02] group-hover:opacity-[0.05] transition-opacity">
-                    <FiArrowUpRight className="text-6xl" />
-                </div>
-                
-                <div className="flex justify-between items-start mb-6">
-                   <h4 className="text-2xl font-black italic tracking-tight uppercase text-slate-200">{position.symbol}</h4>
-                   <span className="text-[9px] font-black text-slate-600 uppercase tracking-widest">Qty: {position.quantity}</span>
-                </div>
-
-                <div className="space-y-4">
-                    <div className="flex justify-between items-end border-b border-white/5 pb-4">
-                        <span className="text-[9px] font-black text-slate-600 uppercase tracking-widest">Value (Spot)</span>
-                        <p className="text-xl font-black italic tracking-tighter">
-                            {['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'TSLA', 'META'].includes(position.symbol) ? '$' : '₹'}{position.currentPrice.toLocaleString()}
-                        </p>
-                    </div>
-                    <div className="flex justify-between items-end pt-2">
-                        <span className="text-[9px] font-black text-slate-600 uppercase tracking-widest">Cost Basis</span>
-                        <p className="text-sm font-bold text-slate-500">
-                            {['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'TSLA', 'META'].includes(position.symbol) ? '$' : '₹'}{position.avgCost.toFixed(1)}
-                        </p>
-                    </div>
-                </div>
-              </MotionDiv>
-            ))
-          ) : (
-            <div className="col-span-full py-24 flex flex-col items-center justify-center opacity-10">
-                <FiTarget className="text-8xl mb-6" />
-                <p className="text-[10px] font-black uppercase tracking-[0.3em]">No Systemic Exposure Detected</p>
+        {/* Positions */}
+        <div className="section-card">
+          <div className="section-card-header">
+            <div className="flex items-center gap-2.5">
+              <div className="rounded-lg border border-emerald-100 bg-emerald-50 p-2">
+                <FiTarget className="text-emerald-600" size={15} />
+              </div>
+              <h3 className="section-title">Active Positions</h3>
             </div>
-          )}
+            <span className="text-xs font-semibold text-slate-500">{portfolio?.positions?.length || 0} positions</span>
+          </div>
+          <div className="p-4">
+            {portfolio?.positions && portfolio.positions.length > 0 ? (
+              <div className="grid grid-cols-2 gap-3 max-h-72 overflow-y-auto pr-1">
+                {portfolio.positions.map((position) => {
+                  const pnl = position.pnl ?? (position.currentPrice - position.avgCost) * position.quantity;
+                  const pnlPct = position.pnlPercent ?? ((position.currentPrice - position.avgCost) / position.avgCost * 100);
+                  const isPositive = pnl >= 0;
+                  return (
+                    <div key={position.symbol} className="rounded-xl border border-slate-100 p-3 hover:border-slate-200 hover:bg-white transition-all">
+                      <div className="flex items-start justify-between mb-2">
+                        <div className="flex items-center gap-1.5">
+                          <div className="w-6 h-6 rounded bg-slate-100 flex items-center justify-center">
+                            <FiPackage size={11} className="text-slate-500" />
+                          </div>
+                          <span className="text-sm font-bold text-slate-900">{position.symbol}</span>
+                        </div>
+                        <span className="text-xs text-slate-400 tabular-nums">×{position.quantity}</span>
+                      </div>
+                      <p className="text-base font-bold text-slate-800 tabular-nums">
+                        {currencySymbol(position.symbol)}{position.currentPrice.toLocaleString()}
+                      </p>
+                      <p className={`text-xs font-semibold tabular-nums mt-0.5 ${isPositive ? 'text-emerald-600' : 'text-red-600'}`}>
+                        {isPositive ? '+' : ''}{pnlPct.toFixed(2)}% · {currencySymbol(position.symbol)}{Math.abs(pnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="py-6">
+                <EmptyState title="No open positions" description="Active positions will appear here once you execute trades." />
+              </div>
+            )}
+          </div>
         </div>
-      </MotionDiv>
-
-      <style jsx global>{`
-        .custom-scrollbar::-webkit-scrollbar {
-          width: 3px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-          background: rgba(255, 255, 255, 0.05);
-          border-radius: 10px;
-        }
-      `}</style>
+      </div>
     </div>
   );
 }

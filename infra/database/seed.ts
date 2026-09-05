@@ -34,44 +34,9 @@ async function seedDatabase() {
     );
     console.log('✅ Sample user created');
 
-    // Insert sample market history
-    const symbols = ['RELIANCE', 'TCS', 'INFY', 'HDFC', 'ICICI'];
-    for (const symbol of symbols) {
-      for (let i = 0; i < 30; i++) {
-        const price = 2000 + Math.random() * 1000;
-        await pool.query(
-          `INSERT INTO market_history (time, symbol, price, open_price, high_price, low_price, volume)
-           VALUES (NOW() - INTERVAL '1 day' * $1, $2, $3, $4, $5, $6, $7)`,
-          [
-            i,
-            symbol,
-            price,
-            price * 0.98,
-            price * 1.05,
-            price * 0.95,
-            Math.floor(Math.random() * 1000000),
-          ]
-        );
-      }
-    }
-    console.log('✅ Market history seeded');
-
-    // Insert sample AI signals
-    for (const symbol of symbols) {
-      await pool.query(
-        `INSERT INTO ai_signals (symbol, signal, confidence, price_target, reasoning)
-         VALUES ($1, $2, $3, $4, $5)
-         ON CONFLICT DO NOTHING`,
-        [
-          symbol,
-          Math.random() > 0.5 ? 'BUY' : 'SELL',
-          Math.random() * 0.3 + 0.6,
-          2000 + Math.random() * 1000,
-          'Technical analysis based on SMA/RSI/MACD',
-        ]
-      );
-    }
-    console.log('✅ AI signals seeded');
+    // 2026 AUDIT: REMOVED SYNTHETIC HISTORY GENERATION
+    // Platform now depends on live data ingest from day zero.
+    console.log('ℹ️  Skipping synthetic history/signal generation (Real-time Only Mode)');
 
     console.log('🎉 Database seeding completed!');
   } catch (error) {

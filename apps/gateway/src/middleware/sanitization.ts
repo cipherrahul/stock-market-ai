@@ -27,7 +27,7 @@ function sanitizeValue(value: any): any {
     // Remove XSS attacks and SQL injection patterns
     let sanitized = xss(value, {
       whiteList: {}, // No HTML tags allowed
-      stripIgnoredTag: true,
+      stripIgnoreTag: true,
     });
 
     // Additional protection against SQL injection sequences

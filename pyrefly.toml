@@ -1,0 +1,5 @@
+# Pyrefly Configuration for Stock Market Agent
+python-interpreter-path = "services/ai-engine-service/.venv/Scripts/python.exe"
+search-path = [
+    "services/ai-engine-service"
+]

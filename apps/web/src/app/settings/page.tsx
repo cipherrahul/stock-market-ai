@@ -1,190 +1,344 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { useApi } from '@/hooks/useApi';
-import { Layout } from '@/components/Layout';
 import toast from 'react-hot-toast';
-import { MotionDiv, MotionButton } from '@/components/Motion';
-import { FiSettings, FiLock, FiCpu, FiBell, FiActivity } from 'react-icons/fi';
+import { Layout } from '@/components/Layout';
+import { PageIntro, SectionCard } from '@/components/EnterpriseUI';
+import { useApi } from '@/hooks/useApi';
+import { useTheme } from '@/contexts/ThemeContext';
+import { ThemeSwitcher } from '@/components/ThemeSwitcher';
+import { FiBell, FiPlus, FiTrash2, FiArrowUp, FiArrowDown, FiUser, FiShield } from 'react-icons/fi';
+import type { PriceAlert } from '@/components/Layout';
+
+function loadAlerts(): PriceAlert[] {
+  if (typeof window === 'undefined') return [];
+  try { return JSON.parse(localStorage.getItem('priceAlerts') || '[]'); } catch { return []; }
+}
+function saveAlerts(alerts: PriceAlert[]) {
+  if (typeof window !== 'undefined') localStorage.setItem('priceAlerts', JSON.stringify(alerts));
+}
 
 export default function SettingsPage() {
   const router = useRouter();
-  const { put, loading } = useApi();
+  const { put, get, loading } = useApi();
+  const { isDracula, setTheme } = useTheme();
+  const token = typeof localStorage !== 'undefined' ? localStorage.getItem('token') || '' : '';
+  const userId = typeof localStorage !== 'undefined' ? localStorage.getItem('userId') || '' : '';
+
+  // Risk preferences
   const [riskLevel, setRiskLevel] = useState('medium');
   const [maxPositionSize, setMaxPositionSize] = useState('100000');
+  const [defaultVariant, setDefaultVariant] = useState<'CNC' | 'MIS'>('CNC');
+  const [defaultStopLossPct, setDefaultStopLossPct] = useState('2');
   const [notifications, setNotifications] = useState(true);
-  const userId = typeof localStorage !== 'undefined' ? localStorage.getItem('userId') : null;
 
+  // Account info
+  const [userEmail, setUserEmail] = useState('');
+  const [userCreatedAt, setUserCreatedAt] = useState('');
+
+  // Price alerts
+  const [alerts, setAlerts] = useState<PriceAlert[]>([]);
+  const [alertSymbol, setAlertSymbol] = useState('');
+  const [alertPrice, setAlertPrice] = useState('');
+  const [alertDirection, setAlertDirection] = useState<'ABOVE' | 'BELOW'>('ABOVE');
+
+  useEffect(() => { if (!token) router.push('/login'); }, [router, token]);
+
+  // Load user profile + saved preferences
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      router.push('/login');
-    }
-  }, [router]);
-
-  const handleSave = async () => {
     if (!userId) return;
-
-    try {
-      await put(`/api/v1/users/${userId}`, {
-        preferences: {
-          riskLevel,
-          maxPositionSize: parseFloat(maxPositionSize),
-          notifications,
-        },
-      });
-      toast.success('Protocols Synchronized Successfully');
-    } catch (error) {
-      toast.error('Configuration Failure: Sync Interrupted');
+    const prefs = JSON.parse(localStorage.getItem(`prefs_${userId}`) || '{}');
+    if (prefs.riskLevel) setRiskLevel(prefs.riskLevel);
+    if (prefs.maxPositionSize) setMaxPositionSize(String(prefs.maxPositionSize));
+    if (prefs.defaultVariant) setDefaultVariant(prefs.defaultVariant);
+    if (prefs.defaultStopLossPct) setDefaultStopLossPct(String(prefs.defaultStopLossPct));
+    if (prefs.notifications !== undefined) setNotifications(prefs.notifications);
+    if (prefs.darkMode !== undefined) {
+      setTheme(prefs.darkMode ? 'dracula' : 'light');
     }
-  };
+
+    setAlerts(loadAlerts());
+
+    get(`/api/v1/users/${userId}`)
+      .then((data: any) => { if (data) { setUserEmail(data.email || ''); setUserCreatedAt(data.createdAt || data.created_at || ''); } })
+      .catch(() => { });
+  }, [userId, get, setTheme]);
+
+  const handleSave = useCallback(async () => {
+    if (!userId) return;
+    const prefs = { riskLevel, maxPositionSize: Number(maxPositionSize), defaultVariant, defaultStopLossPct: Number(defaultStopLossPct), notifications, darkMode: isDracula };
+    localStorage.setItem(`prefs_${userId}`, JSON.stringify(prefs));
+    // Also persist default variant for TradingPanel to read
+    localStorage.setItem('defaultOrderVariant', defaultVariant);
+    localStorage.setItem('defaultStopLossPct', defaultStopLossPct);
+    try {
+      await put(`/api/v1/users/${userId}`, { preferences: prefs });
+      toast.success('Settings saved successfully');
+    } catch {
+      toast.success('Settings saved locally'); // Still save locally even if API fails
+    }
+  }, [userId, riskLevel, maxPositionSize, defaultVariant, defaultStopLossPct, notifications, isDracula, put]);
+
+  const addAlert = useCallback(() => {
+    if (!alertSymbol.trim() || !alertPrice.trim() || isNaN(Number(alertPrice))) {
+      toast.error('Enter a valid symbol and price'); return;
+    }
+    const newAlert: PriceAlert = {
+      id: crypto.randomUUID(),
+      symbol: alertSymbol.trim().toUpperCase(),
+      targetPrice: Number(alertPrice),
+      direction: alertDirection,
+      triggered: false,
+      createdAt: new Date().toISOString(),
+    };
+    const updated = [...alerts, newAlert];
+    setAlerts(updated); saveAlerts(updated);
+    setAlertSymbol(''); setAlertPrice('');
+    toast.success(`Alert set: ${newAlert.symbol} ${alertDirection} ₹${newAlert.targetPrice}`);
+  }, [alertSymbol, alertPrice, alertDirection, alerts]);
+
+  const removeAlert = useCallback((id: string) => {
+    const updated = alerts.filter(a => a.id !== id);
+    setAlerts(updated); saveAlerts(updated);
+    toast('Alert removed', { icon: '🗑️' });
+  }, [alerts]);
+
+  const clearTriggered = useCallback(() => {
+    const updated = alerts.filter(a => !a.triggered);
+    setAlerts(updated); saveAlerts(updated);
+    toast.success('Triggered alerts cleared');
+  }, [alerts]);
+
+  const activeAlerts = alerts.filter(a => !a.triggered);
+  const triggeredAlerts = alerts.filter(a => a.triggered);
 
   return (
     <Layout>
-      <div className="max-w-[1600px] mx-auto space-y-12 pb-24">
-        {/* Sector Header */}
-        <MotionDiv 
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="flex flex-col md:flex-row md:items-end justify-between gap-6 border-b border-white/5 pb-12"
-        >
-          <div>
-            <div className="flex items-center gap-3 mb-4">
-               <div className="p-2 bg-slate-500/10 rounded-lg border border-slate-500/20">
-                  <FiSettings className="text-slate-400 text-sm" />
-               </div>
-               <span className="text-slate-400 font-black tracking-[0.3em] uppercase text-[9px]">System Protocols // Configuration Matrix</span>
-            </div>
-            <h1 className="text-6xl font-black tracking-tighter italic uppercase text-white leading-none">
-              PROTOCOLS
-            </h1>
-            <p className="text-slate-500 font-bold uppercase tracking-[0.2em] text-[10px] mt-4">Autonomous Logic & Security Configuration</p>
-          </div>
+      <div className="space-y-6">
+        <PageIntro
+          badge="Settings"
+          title="Configuration Workspace"
+          description="Execution preferences, default order types, stop-loss defaults, price alerts, and account information."
+          actions={
+            <button onClick={handleSave} disabled={loading} className="primary-button text-xs">
+              {loading ? 'Saving…' : 'Save Changes'}
+            </button>
+          }
+        />
 
-          <div className="flex gap-4">
-             <div className="glass-panel px-6 py-4 rounded-2xl flex items-center gap-4 bg-white/[0.01] border border-white/5">
-                <FiLock className="text-indigo-400" />
-                <div>
-                   <p className="text-[8px] font-black text-slate-600 uppercase tracking-widest">Identity</p>
-                   <p className="text-[10px] font-bold text-white uppercase tracking-tighter">SECURED_CREDENTIALS</p>
+        <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+          {/* Left column */}
+          <div className="space-y-6">
+            {/* Execution Preferences */}
+            <SectionCard title="Execution Preferences" description="Default parameters applied to new orders at the trading desk.">
+              <div className="grid gap-5">
+                <div className="grid gap-5 md:grid-cols-2">
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-medium text-slate-700">Risk Level</span>
+                    <select value={riskLevel} onChange={e => setRiskLevel(e.target.value)} className="input-field">
+                      <option value="low">Low — Conservative</option>
+                      <option value="medium">Medium — Balanced</option>
+                      <option value="high">High — Aggressive</option>
+                    </select>
+                  </label>
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-medium text-slate-700">Max Position Size (₹)</span>
+                    <input value={maxPositionSize} onChange={e => setMaxPositionSize(e.target.value)} className="input-field" type="number" min="1" />
+                  </label>
                 </div>
-             </div>
-          </div>
-        </MotionDiv>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-12">
-           {/* Section 1: Execution Logic */}
-           <MotionDiv 
-             initial={{ opacity: 0, scale: 0.98 }}
-             animate={{ opacity: 1, scale: 1 }}
-             transition={{ delay: 0.1 }}
-             className="lg:col-span-2 space-y-8"
-           >
-              <div className="glass-panel p-10 rounded-[3rem] border border-white/5 bg-white/[0.01]">
-                 <div className="flex items-center gap-4 mb-10">
-                    <FiCpu className="text-indigo-400 text-2xl" />
-                    <h2 className="text-2xl font-black italic uppercase text-white tracking-tighter">Execution Logic</h2>
-                 </div>
-
-                 <div className="space-y-10">
-                    <div>
-                      <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-4 pl-2">Risk Tolerance Vector</label>
-                      <select
-                        value={riskLevel}
-                        onChange={(e) => setRiskLevel(e.target.value)}
-                        className="w-full px-8 py-5 bg-white/[0.02] border border-white/10 rounded-[2rem] text-white focus:outline-none focus:border-indigo-500/50 transition-all font-bold appearance-none cursor-pointer"
-                      >
-                        <option value="low">LOW_VARIANCE_CONSERVATIVE</option>
-                        <option value="medium">BALANCED_OPERATIONAL_GRADE</option>
-                        <option value="high">AGGRESSIVE_ALPHA_PURSUIT</option>
-                      </select>
+                <div className="grid gap-5 md:grid-cols-2">
+                  <div>
+                    <span className="mb-2 block text-sm font-medium text-slate-700">Default Order Type</span>
+                    <div className="flex rounded-xl border border-slate-200 overflow-hidden">
+                      {(['CNC', 'MIS'] as const).map(v => (
+                        <button key={v} onClick={() => setDefaultVariant(v)}
+                          className={`flex-1 py-2.5 text-xs font-bold tracking-widest transition-all ${defaultVariant === v
+                            ? v === 'MIS' ? 'bg-purple-600 text-white' : 'bg-sky-600 text-white'
+                            : 'bg-white text-slate-500 hover:bg-slate-50'}`}>
+                          {v === 'CNC' ? 'CNC — Delivery' : 'MIS — Intraday'}
+                        </button>
+                      ))}
                     </div>
-
-                    <div>
-                      <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-4 pl-2">Max Position Cap (INR)</label>
-                      <input
-                        type="number"
-                        value={maxPositionSize}
-                        onChange={(e) => setMaxPositionSize(e.target.value)}
-                        className="w-full px-8 py-5 bg-white/[0.02] border border-white/10 rounded-[2rem] text-white focus:outline-none focus:border-indigo-500/50 transition-all font-bold"
-                        placeholder="100000"
-                      />
-                    </div>
-                 </div>
-              </div>
-
-              <div className="glass-panel p-10 rounded-[3rem] border border-white/5 bg-white/[0.01]">
-                 <div className="flex items-center gap-4 mb-10">
-                    <FiBell className="text-indigo-400 text-2xl" />
-                    <h2 className="text-2xl font-black italic uppercase text-white tracking-tighter">Comms Protocols</h2>
-                 </div>
-
-                 <div className="flex items-center justify-between p-6 bg-white/[0.02] border border-white/5 rounded-[2rem]">
-                    <div className="flex items-center gap-4">
-                       <div className={`w-3 h-3 rounded-full ${notifications ? 'bg-emerald-500 animate-pulse' : 'bg-slate-700'}`} />
-                       <p className="text-xs font-black text-white uppercase tracking-widest">Real-Time Alerts</p>
-                    </div>
-                    <button 
-                       onClick={() => setNotifications(!notifications)}
-                       className={`w-16 h-8 rounded-full transition-all relative p-1 ${notifications ? 'bg-indigo-600' : 'bg-slate-800'}`}
-                    >
-                       <div className={`w-6 h-6 bg-white rounded-full transition-all ${notifications ? 'translate-x-8' : 'translate-x-0'}`} />
-                    </button>
-                 </div>
-              </div>
-           </MotionDiv>
-
-           {/* Section 2: Summary & Sync */}
-           <MotionDiv 
-             initial={{ opacity: 0, scale: 0.98 }}
-             animate={{ opacity: 1, scale: 1 }}
-             transition={{ delay: 0.2 }}
-             className="lg:col-span-1"
-           >
-              <div className="sticky top-12 space-y-8">
-                 <div className="glass-panel p-10 rounded-[3rem] border-glow bg-white/[0.01]">
-                    <h2 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-8 text-center italic">Deployment Readiness</h2>
-                    
-                    <div className="space-y-6 mb-10">
-                       <div className="flex justify-between items-center text-[10px] font-bold">
-                          <span className="text-slate-600">Risk Profile:</span>
-                          <span className="text-white uppercase tracking-tighter italic">{riskLevel}</span>
-                       </div>
-                       <div className="flex justify-between items-center text-[10px] font-bold">
-                          <span className="text-slate-600">Liquidity Cap:</span>
-                          <span className="text-white uppercase tracking-tighter italic">₹{parseInt(maxPositionSize).toLocaleString()}</span>
-                       </div>
-                       <div className="flex justify-between items-center text-[10px] font-bold">
-                          <span className="text-slate-600">Fleet Comms:</span>
-                          <span className={`uppercase tracking-tighter italic ${notifications ? 'text-emerald-400' : 'text-slate-600'}`}>
-                             {notifications ? 'Nominal' : 'Muted'}
-                          </span>
-                       </div>
-                    </div>
-
-                    <MotionButton
-                      whileHover={{ scale: 1.05 }}
-                      whileTap={{ scale: 0.95 }}
-                      onClick={handleSave}
-                      disabled={loading}
-                      className="w-full py-5 bg-white text-slate-950 font-black rounded-[2rem] uppercase tracking-[0.2em] text-[10px] hover:bg-slate-100 transition-all shadow-xl disabled:opacity-50 flex items-center justify-center gap-3"
-                    >
-                      <FiActivity className={loading ? 'animate-spin' : ''} />
-                      {loading ? 'SYNCHRONIZING...' : 'COMMIT CHANGES'}
-                    </MotionButton>
-                 </div>
-
-                 <div className="glass-panel p-8 rounded-[2rem] border border-white/5 bg-white/[0.01] text-center">
-                    <p className="text-[8px] font-black text-slate-700 uppercase tracking-widest">
-                       System Encryption: AES-256-GCM<br/>
-                       Verified Identity Protocol v4.0
+                    <p className="text-xs text-slate-400 mt-1.5">
+                      {defaultVariant === 'MIS' ? '⚡ Intraday: Auto square-off at 15:30 IST' : '📦 Delivery: Position held overnight'}
                     </p>
-                 </div>
+                  </div>
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-medium text-slate-700">Default Stop-Loss %</span>
+                    <div className="relative">
+                      <input
+                        value={defaultStopLossPct}
+                        onChange={e => setDefaultStopLossPct(e.target.value)}
+                        className="input-field pr-8"
+                        type="number" min="0.1" max="50" step="0.5"
+                      />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">%</span>
+                    </div>
+                  </label>
+                </div>
+
+                <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">Push Notifications</p>
+                    <p className="text-xs text-slate-500 mt-0.5">Trade confirmations, price alerts, and system updates</p>
+                  </div>
+                  <button
+                    onClick={() => setNotifications(n => !n)}
+                    className={`relative w-11 h-6 rounded-full transition-colors ${notifications ? 'bg-blue-600' : 'bg-slate-300'}`}
+                  >
+                    <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow-sm transition-transform ${notifications ? 'translate-x-5' : 'translate-x-0'}`} />
+                  </button>
+                </div>
               </div>
-           </MotionDiv>
+            </SectionCard>
+
+            {/* Theme & Appearance */}
+            <SectionCard
+              title="Theme & Appearance"
+              description="Switch between Light Enterprise and the official Dracula Theme. Applied instantly with zero page reload."
+            >
+              <ThemeSwitcher variant="card" />
+            </SectionCard>
+
+            {/* Price Alerts */}
+            <SectionCard
+              id="alerts"
+              title={<span className="flex items-center gap-2"><FiBell size={15} className="text-blue-500" /> Price Alerts <span className="ml-1 rounded-full bg-blue-600 text-white text-[10px] font-bold px-2 py-0.5">{activeAlerts.length}</span></span>}
+              description="Get notified when any stock crosses your target price."
+              actions={triggeredAlerts.length > 0 ? (
+                <button onClick={clearTriggered} className="secondary-button text-xs"><FiTrash2 size={12} /> Clear triggered</button>
+              ) : undefined}
+            >
+              <div className="space-y-4">
+                {/* Add Alert Form */}
+                <div className="flex flex-wrap gap-2 items-end p-4 bg-slate-50 rounded-xl border border-slate-200">
+                  <div className="flex-1 min-w-[100px]">
+                    <p className="text-xs font-medium text-slate-500 mb-1.5">Symbol</p>
+                    <input value={alertSymbol} onChange={e => setAlertSymbol(e.target.value.toUpperCase())} placeholder="RELIANCE" className="input-field h-9 text-sm uppercase font-bold" />
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium text-slate-500 mb-1.5">Direction</p>
+                    <div className="flex rounded-lg border border-slate-200 overflow-hidden h-9">
+                      {(['ABOVE', 'BELOW'] as const).map(d => (
+                        <button key={d} onClick={() => setAlertDirection(d)}
+                          className={`px-3 text-xs font-bold flex items-center gap-1 transition-colors ${alertDirection === d
+                            ? d === 'ABOVE' ? 'bg-emerald-600 text-white' : 'bg-rose-600 text-white'
+                            : 'bg-white text-slate-600 hover:bg-slate-50'}`}>
+                          {d === 'ABOVE' ? <FiArrowUp size={11} /> : <FiArrowDown size={11} />} {d}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="min-w-[110px]">
+                    <p className="text-xs font-medium text-slate-500 mb-1.5">Target Price (₹)</p>
+                    <input value={alertPrice} onChange={e => setAlertPrice(e.target.value)} placeholder="2800.00" type="number" className="input-field h-9 text-sm tabular-nums" />
+                  </div>
+                  <button onClick={addAlert} className="primary-button h-9 text-xs flex items-center gap-1.5 shrink-0">
+                    <FiPlus size={13} /> Add Alert
+                  </button>
+                </div>
+
+                {/* Active Alerts */}
+                {activeAlerts.length > 0 && (
+                  <div className="space-y-2">
+                    {activeAlerts.map(a => (
+                      <div key={a.id} className="flex items-center justify-between p-3 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 transition-colors">
+                        <div className="flex items-center gap-3">
+                          <span className={`p-1.5 rounded-lg ${a.direction === 'ABOVE' ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
+                            {a.direction === 'ABOVE' ? <FiArrowUp size={12} /> : <FiArrowDown size={12} />}
+                          </span>
+                          <div>
+                            <p className="text-sm font-bold text-slate-900">{a.symbol}</p>
+                            <p className="text-xs text-slate-500">{a.direction} ₹{a.targetPrice.toFixed(2)}</p>
+                          </div>
+                        </div>
+                        <button onClick={() => removeAlert(a.id)} className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors">
+                          <FiTrash2 size={14} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Triggered Alerts */}
+                {triggeredAlerts.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Triggered</p>
+                    {triggeredAlerts.map(a => (
+                      <div key={a.id} className="flex items-center justify-between p-3 rounded-xl border border-slate-100 bg-slate-50 opacity-60">
+                        <div className="flex items-center gap-3">
+                          <span className="p-1.5 rounded-lg bg-slate-100 text-slate-400">
+                            {a.direction === 'ABOVE' ? <FiArrowUp size={12} /> : <FiArrowDown size={12} />}
+                          </span>
+                          <div>
+                            <p className="text-sm font-bold text-slate-600 line-through">{a.symbol}</p>
+                            <p className="text-xs text-slate-400">{a.direction} ₹{a.targetPrice.toFixed(2)} — ✅ Triggered</p>
+                          </div>
+                        </div>
+                        <button onClick={() => removeAlert(a.id)} className="p-1.5 rounded-lg text-slate-300 hover:text-rose-500 transition-colors">
+                          <FiTrash2 size={14} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {alerts.length === 0 && (
+                  <p className="text-xs text-center text-slate-400 py-4">No alerts set. Add one above — alerts fire instantly when prices are received via WebSocket.</p>
+                )}
+              </div>
+            </SectionCard>
+          </div>
+
+          {/* Right column */}
+          <div className="space-y-6">
+            {/* Current Configuration Summary */}
+            <SectionCard title="Active Configuration" description="Effective values for the current session.">
+              <div className="space-y-3">
+                {[
+                  ['Risk Level', riskLevel.charAt(0).toUpperCase() + riskLevel.slice(1)],
+                  ['Position Cap', `₹${Number(maxPositionSize || '0').toLocaleString('en-IN')}`],
+                  ['Default Order', defaultVariant],
+                  ['Default SL', `${defaultStopLossPct}%`],
+                  ['Notifications', notifications ? 'Enabled' : 'Disabled'],
+                  ['Theme', isDracula ? 'Dracula Theme (Dark)' : 'Light Enterprise'],
+                ].map(([label, value]) => (
+                  <div key={label} className="flex items-center justify-between py-2.5 border-b border-slate-100 last:border-0">
+                    <span className="text-xs font-semibold uppercase tracking-[0.1em] text-slate-400">{label}</span>
+                    <span className="text-sm font-bold text-slate-900">{value}</span>
+                  </div>
+                ))}
+              </div>
+            </SectionCard>
+
+            {/* Account Info */}
+            <SectionCard title="Account Information" description="Your registered profile details.">
+              <div className="space-y-4">
+                <div className="flex items-center gap-4 p-4 bg-slate-50 rounded-xl border border-slate-200">
+                  <div className="w-12 h-12 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-lg shrink-0">
+                    <FiUser size={20} />
+                  </div>
+                  <div>
+                    <p className="text-sm font-bold text-slate-900">{userEmail || 'Loading…'}</p>
+                    {userCreatedAt && (
+                      <p className="text-xs text-slate-400 mt-0.5">Member since {new Date(userCreatedAt).toLocaleDateString('en-IN', { year: 'numeric', month: 'long' })}</p>
+                    )}
+                  </div>
+                </div>
+                <div className="p-4 bg-emerald-50 rounded-xl border border-emerald-100 flex items-start gap-3">
+                  <FiShield size={16} className="text-emerald-600 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="text-xs font-bold text-emerald-800">AES-256 Encrypted Session</p>
+                    <p className="text-xs text-emerald-600 mt-0.5">Your trading data is secured end-to-end. Session tokens rotate every 24 hours.</p>
+                  </div>
+                </div>
+              </div>
+            </SectionCard>
+          </div>
         </div>
-      </div>
-    </Layout>
+      </div >
+    </Layout >
   );
 }

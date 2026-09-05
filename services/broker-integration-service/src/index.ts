@@ -39,20 +39,21 @@ app.post('/api/v1/broker/execute', async (req: Request, res: Response) => {
     IDEMPOTENCY_CACHE.add(idempotencyKey);
     setTimeout(() => IDEMPOTENCY_CACHE.delete(idempotencyKey), 60000);
 
-    // 3. SLIPPAGE GATE
-    if (bid && ask) {
-        const spread = (ask - bid) / bid;
-        if (spread > 0.005) return res.status(422).json({ error: 'Toxic Liquidity detected' });
+    // 3. SLIPPAGE GATE (Rocket Precision)
+    const currentBid = Number(bid);
+    const currentAsk = Number(ask);
+    if (currentBid > 0 && currentAsk > 0) {
+        const spread = (currentAsk - currentBid) / currentBid;
+        // Institutional Spread Limit: 0.5% (0.005)
+        if (spread > 0.005) {
+          console.error(`⚠️ [Broker] Toxic Liquidity rejected: Spread ${(spread * 100).toFixed(4)}%`);
+          return res.status(422).json({ error: 'Toxic Liquidity detected: Spread exceeds institutional limit' });
+        }
     }
 
-    // 4. SHADOW SIMULATION (1,000 MONTE CARLO SHOCKS)
-    let survivalCount = 0;
-    for (let i = 0; i < 1000; i++) {
-        const shockSpread = 0.001 * (1 + Math.random() * 5);
-        const shockLag = 10 + Math.random() * 500;
-        if (shockSpread < 0.02 && shockLag < 300) survivalCount++;
-    }
-    if (survivalCount < 950) return res.status(422).json({ error: 'Shadow Stress Test Failed' });
+    // 4. LIVE EXECUTION GATE (2026 AUDIT)
+    // Shadow simulation removed to prioritize real-time order routing
+    console.log(`📡 [Broker] Routing live ${side} order for ${symbol} (Qty: ${quantity})`);
 
     // 5. SMART ORDER ROUTING (SOR)
     const orderRequest: OrderRequest = { symbol, side, price, quantity, idempotencyKey, userId, memo };

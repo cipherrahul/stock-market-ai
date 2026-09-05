@@ -1,13 +1,20 @@
 import React from 'react';
 import { useRealtimeAlpha } from '@/hooks/useRealtime';
 import { usePanicMonitor } from '@/hooks/usePanicMonitor';
-import { MotionDiv } from '@/components/Motion';
-import { FiWind, FiCpu } from 'react-icons/fi';
-import { AnimatePresence } from 'framer-motion';
+import { MotionDiv, AnimatePresence } from '@/components/Motion';
+import {
+  FiActivity,
+  FiLayers,
+  FiShield,
+  FiTrendingUp,
+  FiWind,
+} from 'react-icons/fi';
 import { AlphaInsights } from './AlphaInsights';
 import { PortfolioDashboard } from './PortfolioDashboard';
 import { TradingPanelRealtime } from './TradingPanelRealtime';
 import { PriceTicker } from './PriceTicker';
+import { IntelligenceNewsTerminal } from './IntelligenceNewsTerminal';
+import { SovereignVoice } from './SovereignVoice';
 import { PaymentPanel } from './PaymentPanel';
 
 export const Dashboard: React.FC = () => {
@@ -18,112 +25,150 @@ export const Dashboard: React.FC = () => {
   const { isPanicking, resetPanic } = usePanicMonitor();
   const [isPaper, setIsPaper] = React.useState(false);
 
-  // Dynamic Theme based on sentiment
-  const themeGlow = sentiment > 0.6 ? 'shadow-[0_0_50px_rgba(16,185,129,0.1)]' : sentiment < 0.4 ? 'shadow-[0_0_50px_rgba(139,92,246,0.1)]' : 'shadow-[0_0_50px_rgba(99,102,241,0.1)]';
+  const confidence = Math.max(52, Math.round(60 + sentiment * 32));
+  const capitalFlow = sentiment > 0.55 ? '+4.8%' : sentiment < 0.4 ? '-2.1%' : '+0.9%';
+  
+  const commandTiles = [
+    { label: 'Alpha Confidence', value: `${confidence}%`, icon: FiShield, accent: 'text-blue-600' },
+    { label: 'Regime Vector', value: regime || 'SIDEWAYS', icon: FiLayers, accent: 'text-amber-600' },
+    { label: 'Capital Flow', value: capitalFlow, icon: FiTrendingUp, accent: 'text-emerald-600' },
+    { label: 'Signal Pulse', value: sentiment.toFixed(2), icon: FiActivity, accent: 'text-sky-600' },
+  ];
 
   return (
-    <div className="min-h-screen bg-[#020617] text-slate-50 font-sans selection:bg-indigo-500/30">
-      {/* Global Price Ticker */}
+    <div className="space-y-6 pb-20">
       <PriceTicker token={token} symbols={['RELIANCE', 'TCS', 'INFY', 'HDFCBANK', 'ICICIBANK']} />
 
-      <div className="max-w-[1600px] mx-auto p-8 space-y-12 pb-24">
-          {/* Animated Header */}
-          <MotionDiv
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="flex flex-col md:flex-row justify-between items-start md:items-end border-b border-white/5 pb-10 gap-8"
-          >
-            <div>
-              <div className="flex items-center gap-3 mb-3">
-                <div className="p-2 bg-indigo-500/10 rounded-lg border border-indigo-500/20">
-                    <FiCpu className="text-indigo-400 text-sm" />
-                </div>
-                <p className="text-indigo-400 font-extrabold tracking-[0.3em] uppercase text-[10px]">Institutional Terminal // v2.0.4</p>
-              </div>
-              <h1 className="text-7xl font-black tracking-tighter text-gradient-sovereign leading-none uppercase italic">
-                Sovereign<br />Command Center
-              </h1>
+      <MotionDiv
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="bg-white border border-[#e2e8f0] rounded-2xl shadow-sm p-8"
+      >
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 mb-8">
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <span className="h-2 w-2 rounded-full bg-blue-500"></span>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-[#0067ff]">Institutional Terminal // v2.0.4</p>
             </div>
-
-            <div className={`flex items-center gap-8 bg-white/[0.02] p-6 rounded-[2rem] border border-white/5 backdrop-blur-md transition-all ${themeGlow}`}>
-               {/* MODE TOGGLE */}
-               <div className="flex flex-col gap-2">
-                  <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest text-center">Protocol Mode</p>
-                  <button 
-                    onClick={() => setIsPaper(!isPaper)}
-                    className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all border ${isPaper ? 'bg-amber-500/10 border-amber-500/30 text-amber-400' : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'}`}
-                  >
-                    {isPaper ? 'SHADOW_TRADING' : 'LIVE_SOVEREIGN'}
-                  </button>
-               </div>
-               
-               <div className="h-10 w-[1px] bg-white/10" />
-
-              <div className="text-right">
-                <p className="text-[10px] uppercase opacity-40 font-bold tracking-widest mb-1">Resiliency Delta</p>
-                <div className="flex items-center gap-2 justify-end">
-                  <span className={`w-2 h-2 rounded-full animate-pulse ${isPaper ? 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]' : 'bg-indigo-500 shadow-[0_0_8px_rgba(99,102,241,0.5)]'}`} />
-                  <span className="text-[10px] font-black font-mono opacity-80 uppercase">{isPaper ? 'SIMULATION: ON' : 'SHADOW: 99.9%'}</span>
-                </div>
-              </div>
-              <div className="h-10 w-[1px] bg-white/10" />
-              <div className="text-right">
-                <p className="text-[10px] uppercase opacity-40 font-bold tracking-widest mb-1">Liveness Protocols</p>
-                <div className="flex items-center gap-2 justify-end">
-                  <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
-                  <span className="text-[10px] font-black font-mono opacity-80 text-emerald-400 uppercase tracking-tighter">NOMINAL_STANDBY</span>
-                </div>
-              </div>
-            </div>
-          </MotionDiv>
-
-          {/* Primary Viewport: Intelligence & Execution */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
-             <div className="lg:col-span-2 space-y-10">
-                <AlphaInsights regime={regime} sentimentScore={sentiment} portfolioHistory={[]} />
-                <PortfolioDashboard token={token} userId={userId} isPaper={isPaper} />
-             </div>
-             <div className="lg:col-span-1">
-                <div className="sticky top-10 space-y-10">
-                   <TradingPanelRealtime token={token} userId={userId} isPaper={isPaper} />
-                   <PaymentPanel token={token} userId={userId} />
-                </div>
-             </div>
+            <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight text-slate-900 mb-3">
+              Market <span className="text-[#0067ff]">Command</span> Overview
+            </h1>
+            <p className="text-sm text-slate-500 max-w-2xl leading-relaxed">
+              Real-time portfolio telemetry and cross-market execution control. 
+              Monitor systemic risk and signal intelligence from a single enterprise-view dashboard.
+            </p>
           </div>
+          
+          <div className="flex items-center gap-4 bg-slate-50 p-2 rounded-2xl border border-slate-100">
+             <div className="px-4 py-2">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none mb-1">Trading Mode</p>
+                <p className="text-sm font-bold text-slate-700">{isPaper ? 'Simulation' : 'Live Operations'}</p>
+             </div>
+             <button
+                onClick={() => setIsPaper(!isPaper)}
+                className={`px-6 py-3 rounded-xl text-xs font-bold uppercase tracking-wider transition-all shadow-sm ${
+                  isPaper 
+                    ? 'bg-amber-100 text-amber-700 hover:bg-amber-200 border border-amber-200' 
+                    : 'bg-[#0067ff] text-white hover:bg-blue-700 shadow-blue-200 shadow-lg'
+                }`}
+              >
+                {isPaper ? 'Switch to Live' : 'Go Shadow'}
+              </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {commandTiles.map(({ label, value, icon: Icon, accent }) => (
+            <div key={label} className="bg-[#f8fafc] border border-slate-200 rounded-xl p-5 group transition-all hover:border-blue-200 hover:bg-white hover:shadow-md">
+              <div className="flex items-center justify-between mb-4">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">{label}</p>
+                <div className={`p-2 rounded-lg bg-white border border-slate-100 group-hover:bg-blue-50 group-hover:border-blue-100 transition-colors`}>
+                  <Icon className={`text-sm ${accent}`} />
+                </div>
+              </div>
+              <p className="text-2xl font-black text-slate-800 tracking-tight">{value}</p>
+            </div>
+          ))}
+        </div>
+      </MotionDiv>
+
+      <div className="grid gap-6 xl:grid-cols-12">
+        <div className="xl:col-span-8 space-y-6">
+          <div className="bg-white border border-[#e2e8f0] rounded-2xl shadow-sm overflow-hidden">
+            <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/30">
+               <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider">Alpha Matrix & Portfolio</h3>
+               <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-full uppercase tracking-widest">Real-time Feed</span>
+            </div>
+            <div className="p-6 space-y-6">
+              <SovereignVoice regime={regime || 'NEUTRAL'} sentiment={sentiment} />
+              <div className="grid md:grid-cols-2 gap-6">
+                 <AlphaInsights regime={regime} sentimentScore={sentiment} portfolioHistory={[]} />
+                 <PortfolioDashboard token={token} userId={userId} isPaper={isPaper} />
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white border border-[#e2e8f0] rounded-2xl shadow-sm overflow-hidden">
+            <div className="px-6 py-5 border-b border-slate-100 bg-slate-50/30">
+               <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider">Trade Execution Control</h3>
+            </div>
+            <div className="p-6">
+              <TradingPanelRealtime token={token} userId={userId} isPaper={isPaper} />
+            </div>
+          </div>
+        </div>
+
+        <div className="xl:col-span-4 space-y-6">
+          <div className="bg-white border border-[#e2e8f0] rounded-2xl shadow-sm overflow-hidden h-full flex flex-col">
+            <div className="px-6 py-5 border-b border-slate-100 bg-slate-50/30">
+               <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider">Intelligence & Insights</h3>
+            </div>
+            <div className="flex-1 p-6">
+              <IntelligenceNewsTerminal />
+            </div>
+          </div>
+        </div>
       </div>
-      
-      {/* ZEN MODE OVERLAY (Emotion-Aware UX) */}
+
+      <div className="grid gap-6 xl:grid-cols-12">
+        <div className="xl:col-span-12">
+           <div className="bg-white border border-[#e2e8f0] rounded-2xl shadow-sm overflow-hidden">
+            <div className="px-6 py-5 border-b border-slate-100 bg-slate-50/30">
+               <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider">Treasury & Settlements</h3>
+            </div>
+            <div className="p-6">
+               <PaymentPanel token={token} userId={userId} />
+            </div>
+           </div>
+        </div>
+      </div>
+
       <AnimatePresence>
         {isPanicking && (
-          <MotionDiv 
+          <MotionDiv
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] backdrop-blur-3xl bg-slate-950/60 flex items-center justify-center p-8"
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/40 p-8 backdrop-blur-md"
           >
-            <MotionDiv 
-              initial={{ scale: 0.9, y: 20 }}
+            <MotionDiv
+              initial={{ scale: 0.95, y: 10 }}
               animate={{ scale: 1, y: 0 }}
-              className="max-w-2xl bg-[#020617] border border-white/10 rounded-[4rem] p-16 text-center shadow-2xl relative overflow-hidden"
+              className="bg-white max-w-xl w-full rounded-3xl border border-slate-200 p-12 text-center shadow-2xl"
             >
-              <div className="absolute inset-0 bg-indigo-500/5 animate-pulse" />
-              <div className="relative z-10 text-center">
-                  <div className="w-24 h-24 bg-indigo-500/10 rounded-full flex items-center justify-center mx-auto mb-10 border border-indigo-500/20 shadow-[0_0_30px_rgba(99,102,241,0.2)]">
-                    <FiWind className="text-5xl text-indigo-400" />
-                  </div>
-                  <h2 className="text-5xl font-black mb-6 tracking-tighter italic uppercase text-gradient-sovereign">Sovereign Calm</h2>
-                  <p className="text-slate-400 text-lg leading-relaxed mb-10 max-w-lg mx-auto font-medium">
-                    Systemic sensors detect high operational variance. Autonomous logic is currently neutralizing volatility clusters to protect your principal capital. 
-                    <br/><br/>
-                    <span className="text-indigo-400 font-black italic">YOUR CAPITAL IS GROUNDED.</span>
-                  </p>
-                  <button 
-                    onClick={resetPanic}
-                    className="px-12 py-5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-[2rem] font-bold transition-all shadow-2xl shadow-indigo-500/30 uppercase tracking-[0.2em] text-xs border border-indigo-400/20"
-                  >
-                    Resync My Consciousness
-                  </button>
+              <div className="mx-auto mb-8 flex h-20 w-20 items-center justify-center rounded-full bg-blue-50 border border-blue-100">
+                <FiWind className="text-4xl text-[#0067ff]" />
               </div>
+              <h2 className="text-2xl font-bold text-slate-900 mb-4">Sovereign Calm Mode Active</h2>
+              <p className="text-slate-500 mb-10 leading-relaxed">
+                Systemic sensors detect high operational variance. Autonomous behavioral logic has neutralized volatility clusters to safeguard principal assets.
+              </p>
+              <button
+                onClick={resetPanic}
+                className="w-full rounded-xl bg-[#0067ff] px-8 py-4 text-sm font-bold uppercase tracking-wider text-white shadow-xl shadow-blue-200 transition-all hover:bg-blue-700"
+              >
+                Reset Operations
+              </button>
             </MotionDiv>
           </MotionDiv>
         )}

@@ -1,13 +1,10 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
+import { useWebSocket } from '@/contexts/WebSocketContext';
+import axios from 'axios';
 
-// Explicit Types to resolve 'any' and NodeJS namespace issues
-type Timeout = ReturnType<typeof setTimeout>;
-type Interval = ReturnType<typeof setInterval>;
+// === Types ===
 
-/**
- * REALTIME PRICE UPDATE HOOK
- */
-interface PriceUpdate {
+export interface PriceUpdate {
   symbol: string;
   price: number;
   change: number;
@@ -18,143 +15,24 @@ interface PriceUpdate {
   timestamp: Date;
 }
 
-interface UseRealtimePriceReturn {
-  prices: Map<string, PriceUpdate>;
-  connected: boolean;
-  error: string | null;
-  subscribe: (symbol: string) => void;
-  unsubscribe: (symbol: string) => void;
-}
-
-export function useRealtimePrice(token: string): UseRealtimePriceReturn {
-  const wsRef = useRef<WebSocket | null>(null);
-  const [prices, setPrices] = useState<Map<string, PriceUpdate>>(new Map());
-  const [connected, setConnected] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const reconnectAttemptRef = useRef<number>(0);
-  const reconnectTimeoutRef = useRef<Timeout | null>(null);
-  const subscriptionsRef = useRef<Set<string>>(new Set());
-
-  const connect = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) return;
-
-    try {
-      const WS_URL = process.env.NEXT_PUBLIC_WS_URL || `ws://localhost:3000/ws`;
-      const ws = new WebSocket(`${WS_URL}?token=${token}`);
-
-      ws.onopen = () => {
-        setConnected(true);
-        setError(null);
-        reconnectAttemptRef.current = 0; // Reset attempts
-        subscriptionsRef.current.forEach((symbol: string) => {
-          ws.send(JSON.stringify({ type: 'SUBSCRIBE', channel: `price:${symbol}` }));
-        });
-      };
-
-      ws.onmessage = (event: MessageEvent) => {
-        try {
-          const message = JSON.parse(event.data);
-          if (message.type === 'PRICE_UPDATES') {
-            const update = message.data as PriceUpdate;
-            setPrices((prev: Map<string, PriceUpdate>) => {
-              const newMap = new Map(prev);
-              newMap.set(update.symbol, update);
-              return newMap;
-            });
-          }
-        } catch (err) {
-          console.error('WS Parse Error:', err);
-        }
-      };
-
-      ws.onclose = (event: CloseEvent) => {
-        setConnected(false);
-        if (!event.wasClean) {
-          const delay = Math.min(1000 * Math.pow(2, reconnectAttemptRef.current), 30000);
-          reconnectAttemptRef.current += 1;
-          console.warn(`WebSocket closed. Reconnecting in ${delay}ms... (Attempt ${reconnectAttemptRef.current})`);
-          reconnectTimeoutRef.current = setTimeout(connect, delay);
-        }
-      };
-
-      ws.onerror = (err: Event) => {
-        console.error('WebSocket Error:', err);
-        setError('Real-time connection error');
-      };
-
-      wsRef.current = ws;
-    } catch (err: any) {
-      setError(err.message);
-    }
-  }, [token]);
-
-  useEffect(() => {
-    connect();
-    const heartbeat: Interval = setInterval(() => {
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ type: 'PING' }));
-      }
-    }, 30000);
-
-    return () => {
-      clearInterval(heartbeat);
-      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
-      if (wsRef.current) wsRef.current.close();
-    };
-  }, [connect]);
-
-  return { 
-    prices, 
-    connected, 
-    error, 
-    subscribe: (s: string) => { subscriptionsRef.current.add(s); connect(); },
-    unsubscribe: (s: string) => { subscriptionsRef.current.delete(s); }
-  };
-}
-
-interface PortfolioUpdate {
+export interface PortfolioUpdate {
   cash: number;
   totalValue: number;
   totalGain: number;
   gainPercent: number;
   balances?: { cash: number; currency: string }[];
-  positions: any[];
+  positions: {
+    symbol: string;
+    quantity: number;
+    currentPrice: number;
+    avgCost: number;
+    pnl?: number;
+    pnlPercent?: number;
+  }[];
   timestamp: string;
 }
 
-export function useRealtimePortfolio(token: string, userId: string, isPaper: boolean = false): { portfolio: PortfolioUpdate | null, connected: boolean, error: string | null } {
-  const [portfolio, setPortfolio] = useState<PortfolioUpdate | null>(null);
-  const [connected, setConnected] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
-
-  useEffect(() => {
-    const WS_URL = process.env.NEXT_PUBLIC_WS_URL || `ws://localhost:3000/ws`;
-    const ws = new WebSocket(`${WS_URL}?token=${token}&userId=${userId}&isPaper=${isPaper}`);
-
-    ws.onopen = () => {
-      setConnected(true);
-      setError(null);
-    };
-
-    ws.onmessage = (e: MessageEvent) => {
-      try {
-          const msg = JSON.parse(e.data);
-          if (msg.type === 'PORTFOLIO_UPDATES') setPortfolio(msg.data as PortfolioUpdate);
-      } catch (err) { console.error(err); }
-    };
-
-    ws.onerror = () => setError('Websocket connection failed');
-    ws.onclose = () => setConnected(false);
-
-    wsRef.current = ws;
-    return () => ws.close();
-  }, [token, userId, isPaper]);
-
-  return { portfolio, connected, error };
-}
-
-interface OrderUpdate {
+export interface OrderUpdate {
   orderId: string;
   symbol: string;
   quantity: number;
@@ -165,87 +43,21 @@ interface OrderUpdate {
   timestamp: string;
 }
 
-export function useRealtimeOrders(token: string, isPaper: boolean = false): { orders: OrderUpdate[], connected: boolean, error: string | null } {
-  const [orders, setOrders] = useState<OrderUpdate[]>([]);
-  const [connected, setConnected] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const WS_URL = process.env.NEXT_PUBLIC_WS_URL || `ws://localhost:3000/ws`;
-    const ws = new WebSocket(`${WS_URL}?token=${token}&isPaper=${isPaper}`);
-
-    ws.onopen = () => {
-      setConnected(true);
-      setError(null);
-    };
-
-    ws.onmessage = (e: MessageEvent) => {
-      try {
-          const msg = JSON.parse(e.data);
-          if (msg.type === 'ORDER_UPDATES') {
-            setOrders(prev => [msg.data as OrderUpdate, ...prev]);
-          }
-      } catch (err) { console.error(err); }
-    };
-
-    ws.onerror = () => setError('Order stream connection failed');
-    ws.onclose = () => setConnected(false);
-
-    return () => ws.close();
-  }, [token, isPaper]);
-
-  return { orders, connected, error };
-}
-
-interface AISignalUpdate {
+export interface AISignalUpdate {
   symbol: string;
   signal: 'BUY' | 'SELL' | 'HOLD';
   confidence: number;
+  regime?: string;
   reasoning: string;
 }
 
-export function useRealtimeSignals(token: string): { signals: Map<string, AISignalUpdate> } {
-  const [signals, setSignals] = useState<Map<string, AISignalUpdate>>(new Map());
-  useEffect(() => {
-    const WS_URL = process.env.NEXT_PUBLIC_WS_URL || `ws://localhost:3000/ws`;
-    const ws = new WebSocket(`${WS_URL}?token=${token}`);
-    ws.onmessage = (e: MessageEvent) => {
-      try {
-          const msg = JSON.parse(e.data);
-          if (msg.type === 'AI_SIGNALS') {
-            setSignals((prev: Map<string, AISignalUpdate>) => {
-              const next = new Map(prev);
-              const data = msg.data as AISignalUpdate;
-              next.set(data.symbol, data);
-              return next;
-            });
-          }
-      } catch (err) { console.error(err); }
-    };
-    return () => ws.close();
-  }, [token]);
-  return { signals };
+export interface SentimentUpdate {
+  score: number;
+  label: string;
+  timestamp: string;
 }
 
-/**
- * REALTIME ALPHA INSIGHTS HOOK
- */
-export function useRealtimeAlpha(token: string): { regime: string, sentiment: number } {
-  const [alpha, setAlpha] = useState({ regime: 'SIDEWAYS', sentiment: 0.5 });
-  useEffect(() => {
-    const WS_URL = process.env.NEXT_PUBLIC_WS_URL || `ws://localhost:3000/ws`;
-    const ws = new WebSocket(`${WS_URL}?token=${token}`);
-    ws.onmessage = (e: MessageEvent) => {
-      const msg = JSON.parse(e.data);
-      if (msg.type === 'SENTIMENT_UPDATES') setAlpha(prev => ({ ...prev, sentiment: msg.data.score }));
-      if (msg.type === 'AI_SIGNALS') setAlpha(prev => ({ ...prev, regime: msg.data.regime }));
-    };
-    return () => ws.close();
-  }, [token]);
-  return alpha;
-}
-
-interface Alert {
+export interface Alert {
   id: string;
   event: string;
   symbol?: string;
@@ -255,25 +67,146 @@ interface Alert {
   timestamp: string;
 }
 
-export function useRealtimeAlerts(token: string): { alerts: Alert[], removeAlert: (id: string) => void } {
+export interface IntradayPosition {
+  symbol: string;
+  netQty: number;
+  avgBuyPrice: number;
+  currentPrice: number;
+  pnl: number;
+  pnlPercent: number;
+  side: 'BUY' | 'SELL';
+  lastActivity: string;
+  isIntraday: true;
+}
+
+// === useRealtimePrice ===
+
+export function useRealtimePrice(_token: string) {
+  const { status, subscribe, subscribePriceChannel, unsubscribePriceChannel } = useWebSocket();
+  const [prices, setPrices] = useState<Map<string, PriceUpdate>>(new Map());
+
+  const handlePriceUpdate = useCallback((data: unknown) => {
+    const update = data as PriceUpdate;
+    if (!update?.symbol) return;
+    setPrices(prev => {
+      const next = new Map(prev);
+      next.set(update.symbol, { ...update, timestamp: new Date() });
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    return subscribe('PRICE_UPDATES', handlePriceUpdate);
+  }, [subscribe, handlePriceUpdate]);
+
+  return {
+    prices,
+    connected: status === 'connected',
+    error: status === 'error' ? 'Real-time connection error' : null,
+    subscribe: subscribePriceChannel,
+    unsubscribe: unsubscribePriceChannel,
+  };
+}
+
+// === useRealtimePortfolio ===
+
+export function useRealtimePortfolio(_token: string, _userId: string, _isPaper: boolean = false) {
+  const { status, subscribe } = useWebSocket();
+  const [portfolio, setPortfolio] = useState<PortfolioUpdate | null>(null);
+
+  useEffect(() => {
+    return subscribe('PORTFOLIO_UPDATES', (data) => {
+      setPortfolio(data as PortfolioUpdate);
+    });
+  }, [subscribe]);
+
+  return {
+    portfolio,
+    connected: status === 'connected',
+    error: status === 'error' ? 'Portfolio stream error' : null,
+  };
+}
+
+// === useRealtimeOrders ===
+
+export function useRealtimeOrders(_token: string, _isPaper: boolean = false) {
+  const { status, subscribe } = useWebSocket();
+  const [orders, setOrders] = useState<OrderUpdate[]>([]);
+
+  useEffect(() => {
+    return subscribe('ORDER_UPDATES', (data) => {
+      setOrders(prev => {
+        const update = data as OrderUpdate;
+        const filtered = prev.filter(o => o.orderId !== update.orderId);
+        return [update, ...filtered].slice(0, 50);
+      });
+    });
+  }, [subscribe]);
+
+  return {
+    orders,
+    connected: status === 'connected',
+    error: status === 'error' ? 'Order stream error' : null,
+  };
+}
+
+// === useRealtimeSignals ===
+
+export function useRealtimeSignals(_token: string) {
+  const { subscribe } = useWebSocket();
+  const [signals, setSignals] = useState<Map<string, AISignalUpdate>>(new Map());
+
+  useEffect(() => {
+    return subscribe('AI_SIGNALS', (data) => {
+      const update = data as AISignalUpdate;
+      setSignals(prev => {
+        const next = new Map(prev);
+        next.set(update.symbol, update);
+        return next;
+      });
+    });
+  }, [subscribe]);
+
+  return { signals };
+}
+
+// === useRealtimeAlpha ===
+
+export function useRealtimeAlpha(_token: string) {
+  const { subscribe } = useWebSocket();
+  const [regime, setRegime] = useState('SIDEWAYS');
+  const [sentiment, setSentiment] = useState(0.5);
+
+  useEffect(() => {
+    const unsubSentiment = subscribe('SENTIMENT_UPDATES', (data) => {
+      const d = data as SentimentUpdate;
+      if (typeof d?.score === 'number') setSentiment(d.score);
+    });
+    const unsubSignals = subscribe('AI_SIGNALS', (data) => {
+      const d = data as AISignalUpdate;
+      if (d?.regime) setRegime(d.regime);
+    });
+    return () => { unsubSentiment(); unsubSignals(); };
+  }, [subscribe]);
+
+  return { regime, sentiment };
+}
+
+// === useRealtimeAlerts ===
+
+export function useRealtimeAlerts(_token: string) {
+  const { subscribe } = useWebSocket();
   const [alerts, setAlerts] = useState<Alert[]>([]);
 
   useEffect(() => {
-    if (!token) return;
-    const WS_URL = process.env.NEXT_PUBLIC_WS_URL || `ws://localhost:3000/ws`;
-    const ws = new WebSocket(`${WS_URL}?token=${token}`);
-
-    ws.onmessage = (e: MessageEvent) => {
-      try {
-        const msg = JSON.parse(e.data);
-        if (msg.type === 'RISK_ALERTS') {
-          setAlerts(prev => [msg.data as Alert, ...prev]);
-        }
-      } catch (err) { console.error(err); }
-    };
-
-    return () => ws.close();
-  }, [token]);
+    return subscribe('RISK_ALERTS', (data) => {
+      const alert = data as Alert;
+      setAlerts(prev => {
+        if (prev.some(a => a.id === alert.id)) return prev;
+        return [alert, ...prev].slice(0, 20);
+      });
+    });
+  }, [subscribe]);
 
   const removeAlert = useCallback((id: string) => {
     setAlerts(prev => prev.filter(a => a.id !== id));
@@ -281,3 +214,108 @@ export function useRealtimeAlerts(token: string): { alerts: Alert[], removeAlert
 
   return { alerts, removeAlert };
 }
+
+// === useIntradayPositions ===
+// Polls intraday (MIS) positions with live price enrichment from the WebSocket prices map
+
+export function useIntradayPositions(token: string, userId: string) {
+  const [positions, setPositions] = useState<IntradayPosition[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const fetchPositions = useCallback(async () => {
+    if (!userId) return;
+    try {
+      const res = await axios.get(`${apiUrl}/api/v1/trading/intraday/positions/${userId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        timeout: 8000,
+      });
+      const raw = res.data?.positions || [];
+      setPositions(raw.map((p: any) => ({
+        ...p,
+        currentPrice: p.avgBuyPrice, // Will be enriched by caller with live prices
+        pnl: 0,
+        pnlPercent: 0,
+      })));
+      setError(null);
+    } catch (err: any) {
+      setError(err?.message || 'Failed to load intraday positions');
+    } finally {
+      setLoading(false);
+    }
+  }, [token, userId, apiUrl]);
+
+  useEffect(() => {
+    if (!userId) return;
+    setLoading(true);
+    fetchPositions();
+
+    // Poll every 5 seconds during market hours
+    pollingRef.current = setInterval(fetchPositions, 5000);
+    return () => {
+      if (pollingRef.current) clearInterval(pollingRef.current);
+    };
+  }, [fetchPositions, userId]);
+
+  return { positions, loading, error, refetch: fetchPositions };
+}
+
+// === useSquareOffTimer ===
+// Returns seconds remaining until NSE market close (15:30 IST) and fires warning alerts
+
+export function useSquareOffTimer() {
+  const getSecondsToClose = () => {
+    const now = new Date();
+    // IST = UTC+5:30
+    const istOffsetMs = 5.5 * 60 * 60 * 1000;
+    const istNow = new Date(now.getTime() + istOffsetMs - now.getTimezoneOffset() * 60000);
+    const closeTime = new Date(istNow);
+    closeTime.setHours(15, 30, 0, 0);
+    const diff = closeTime.getTime() - istNow.getTime();
+    return Math.max(0, Math.floor(diff / 1000));
+  };
+
+  const isMarketOpen = () => {
+    const now = new Date();
+    const istOffsetMs = 5.5 * 60 * 60 * 1000;
+    const istNow = new Date(now.getTime() + istOffsetMs - now.getTimezoneOffset() * 60000);
+    const h = istNow.getHours();
+    const m = istNow.getMinutes();
+    const totalMins = h * 60 + m;
+    return totalMins >= 9 * 60 + 15 && totalMins < 15 * 60 + 30;
+  };
+
+  const [secondsLeft, setSecondsLeft] = useState(getSecondsToClose);
+  const [marketOpen, setMarketOpen] = useState(isMarketOpen);
+  const [warningLevel, setWarningLevel] = useState<null | '15min' | '5min' | 'urgent'>(null);
+
+  useEffect(() => {
+    const tick = () => {
+      const secs = getSecondsToClose();
+      const open = isMarketOpen();
+      setSecondsLeft(secs);
+      setMarketOpen(open);
+      if (open) {
+        if (secs <= 5 * 60) setWarningLevel('urgent');
+        else if (secs <= 15 * 60) setWarningLevel('15min');
+        else setWarningLevel(null);
+      }
+    };
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const formatCountdown = (secs: number) => {
+    const h = Math.floor(secs / 3600);
+    const m = Math.floor((secs % 3600) / 60);
+    const s = secs % 60;
+    if (h > 0) return `${h}h ${m}m`;
+    if (m > 0) return `${m}m ${String(s).padStart(2, '0')}s`;
+    return `${s}s`;
+  };
+
+  return { secondsLeft, marketOpen, warningLevel, formatCountdown };
+}

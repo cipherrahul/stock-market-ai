@@ -45,9 +45,9 @@ export class ZerodhaAdapter extends BaseBroker {
                 order_type: "MARKET",
             };
 
-            // In production, we'd wait for the actual promise if not comment out
-            // const result = await this.kite.placeOrder("regular", params);
-            const orderId = `z_ord_${Math.random().toString(36).substr(2, 9)}`;
+            // 2026 AUDIT: MANDATORY LIVE EXECUTION
+            const result = await this.kite.placeOrder("regular", params);
+            const orderId = result.order_id;
 
             return {
                 status: 'EXECUTED',

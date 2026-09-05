@@ -2,8 +2,7 @@
 
 import { FiAlertCircle, FiX, FiCheckCircle, FiZap, FiShield } from 'react-icons/fi';
 import { useRealtimeAlerts } from '@/hooks/useRealtime';
-import { MotionDiv } from '@/components/Motion';
-import { AnimatePresence } from 'framer-motion';
+import { MotionDiv, AnimatePresence } from '@/components/Motion';
 
 export const AlertContainer: React.FC = () => {
   const token = typeof localStorage !== 'undefined' ? localStorage.getItem('token') || '' : '';
